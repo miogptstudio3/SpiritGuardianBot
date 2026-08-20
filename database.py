@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 # You can override this with DB_PATH in Render Environment Variables.
 DEFAULT_DB_PATH = "/var/data/spirits.db" if os.path.isdir("/var/data") else "spirits.db"
 DB_PATH = os.getenv("DB_PATH", DEFAULT_DB_PATH)
+# Always ensure the directory exists so SQLite can create the file (persistent disk or local)
+_db_parent = os.path.dirname(DB_PATH)
+if _db_parent:
+    os.makedirs(_db_parent, exist_ok=True)
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:

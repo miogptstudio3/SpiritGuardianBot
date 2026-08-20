@@ -13,7 +13,11 @@ from database import (
 
 router=Router()
 
-def can(role,p): return p in ROLE_PERMISSIONS.get(role,set())
+def can(role, p):
+    # ویژه و سازنده اصلی همیشه همه دسترسی‌ها را دارند
+    if role == "ویژه":
+        return True
+    return p in ROLE_PERMISSIONS.get(role, set())
 
 async def deny(event):
     await event.answer("⛔ دسترسی کافی نداری.",show_alert=True)
@@ -77,7 +81,7 @@ async def panel(message:Message):
 @router.callback_query(F.data.startswith("adm:"))
 async def adm(call:CallbackQuery):
     role=await get_role(call.from_user.id); a=call.data.split(":")[1]
-    perms={"stats":"stats","users":"users","staff":"users","logs":"users","spirits":"addspirit","shop":"addspirit","roles":"setrole","help":"panel"}
+    perms={"stats":"stats","users":"users","staff":"users","logs":"logs","spirits":"addspirit","shop":"shop","roles":"setrole","help":"panel"}
     required = perms.get(a, "panel" if a == "home" else None)
     if required and not can(role, required): return await deny(call)
     if a=="home":
@@ -202,7 +206,7 @@ async def ban_help(call:CallbackQuery):
 @router.message(Command("setgems"))
 async def setgems(message:Message):
     role=await get_role(message.from_user.id)
-    if not can(role,"give"): return await deny(message)
+    if not can(role,"setgems") and not can(role,"give"): return await deny(message)
     p=message.text.split()
     if len(p)!=3 or not p[1].isdigit() or not p[2].lstrip("-").isdigit(): return await message.reply("فرمت: /setgems ID مقدار")
     uid,delta=int(p[1]),int(p[2])
@@ -213,7 +217,7 @@ async def setgems(message:Message):
 @router.message(Command("sethealth"))
 async def sethealth(message:Message):
     role=await get_role(message.from_user.id)
-    if not can(role,"give"): return await deny(message)
+    if not can(role,"sethealth") and not can(role,"give"): return await deny(message)
     p=message.text.split()
     if len(p)!=3 or not p[1].isdigit() or not p[2].isdigit(): return await message.reply("فرمت: /sethealth ID مقدار")
     uid,h=int(p[1]),int(p[2])
@@ -224,7 +228,7 @@ async def sethealth(message:Message):
 @router.message(Command("setlevel"))
 async def setlevel(message:Message):
     role=await get_role(message.from_user.id)
-    if not can(role,"setrole"): return await deny(message)
+    if not can(role,"setlevel") and not can(role,"setrole"): return await deny(message)
     p=message.text.split()
     if len(p)!=3 or not p[1].isdigit() or not p[2].isdigit(): return await message.reply("فرمت: /setlevel ID سطح")
     uid,l=int(p[1]),int(p[2])
@@ -259,7 +263,7 @@ async def tempban(message:Message):
 @router.message(Command("adminlogs"))
 async def adminlogs(message:Message):
     role=await get_role(message.from_user.id)
-    if not can(role,"users"): return await deny(message)
+    if not can(role,"logs") and not can(role,"users"): return await deny(message)
     rows=await get_admin_logs()
     t="📜 <b>لاگ مدیران</b>\n\n"+"".join(f"{x['created_at']} | {x['admin_id']} | {x['action']} | {x['target_id'] or '-'} | {x['details'] or ''}\n" for x in rows)
     await message.reply(t[:4000] or "لاگ خالی است.")

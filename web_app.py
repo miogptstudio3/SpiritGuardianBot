@@ -5,7 +5,11 @@ import aiosqlite
 
 DB_PATH = os.getenv('DB_PATH', '/var/data/spirits.db' if os.path.isdir('/var/data') else 'spirits.db')
 BOT_TOKEN = os.getenv('BOT_TOKEN', '')
-BASE_DIR = os.path.join(os.path.dirname(__file__), 'webapp')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Ensure parent directory of DB exists (critical for /var/data persistent disk)
+_db_dir = os.path.dirname(DB_PATH)
+if _db_dir:
+    os.makedirs(_db_dir, exist_ok=True)
 
 
 def validate_init_data(init_data: str):
