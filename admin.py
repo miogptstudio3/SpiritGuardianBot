@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from config import ROLE_LEVELS, ROLE_PERMISSIONS
+from config import ROLE_LEVELS, ROLE_PERMISSIONS, CREATOR_ID
 from database import (
     get_role, set_role, remove_staff, set_ban, clear_ban,
     get_user_count, get_spirit_count, get_staff_list, admin_give,
@@ -26,6 +26,8 @@ async def require_perm(event, perm):
     return role
 
 async def can_manage_target(actor_id, target_id):
+    if target_id == CREATOR_ID:
+        return False
     actor_role = await get_role(actor_id)
     target_role = await get_role(target_id)
     return ROLE_LEVELS.get(actor_role, 0) > ROLE_LEVELS.get(target_role, 0)
@@ -124,6 +126,8 @@ async def user_page(call:CallbackQuery):
     role=await get_role(call.from_user.id)
     if not can(role,"users"): return await deny(call)
     uid=int(call.data.split(":")[1])
+    if uid == CREATOR_ID:
+        return await call.answer('🔒 حساب سازنده قابل مدیریت نیست.', show_alert=True)
     user,mod,wc=await get_full_user(uid)
     if not user: return await call.answer("کاربر پیدا نشد.",show_alert=True)
     ban="🚫 مسدود" if mod and mod["banned"] else "✅ آزاد"
@@ -134,7 +138,10 @@ async def user_page(call:CallbackQuery):
 async def user_profile(call:CallbackQuery):
     role=await get_role(call.from_user.id)
     if not can(role,"users"): return await deny(call)
-    uid=int(call.data.split(":")[1]); u,m,w=await get_full_user(uid)
+    uid=int(call.data.split(":")[1]);
+    if uid == CREATOR_ID:
+        return await call.answer('🔒 حساب سازنده قابل مدیریت نیست.', show_alert=True)
+    u,m,w=await get_full_user(uid)
     if not u: return await call.answer("کاربر پیدا نشد.",show_alert=True)
     await call.message.edit_text(
         f"📋 <b>پروفایل مدیریتی</b>\n\n👤 {u['name']}\n🆔 <code>{uid}</code>\n"

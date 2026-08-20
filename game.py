@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database import (ensure_user,get_user,top_users,daily_claim,list_shop_items,get_shop_item,buy_shop_item,get_inventory,
     list_regions,get_region,list_story_spirits,get_story_spirit,get_next_clue,advance_spirit,list_demons,get_demon,get_or_create_encounter,update_encounter,add_progress,
-    create_marriage_proposal,get_pending_proposal,respond_marriage,get_marriage,list_children,adopt_child,care_for_child)
+    create_marriage_proposal,get_pending_proposal,respond_marriage,get_marriage,list_children,adopt_child,care_for_child,train_mind,get_training_stats)
 
 router=Router()
 
@@ -12,14 +12,54 @@ def main_game_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='👻 دفتر ارواح',callback_data='world:spirits'),InlineKeyboardButton(text='😈 جن‌ها',callback_data='world:demons')],
         [InlineKeyboardButton(text='🗺️ جهان',callback_data='world:regions'),InlineKeyboardButton(text='🎒 کوله‌پشتی',callback_data='world:inventory')],
-        [InlineKeyboardButton(text='💍 خانواده',callback_data='world:family')],
+        [InlineKeyboardButton(text='💍 خانواده',callback_data='world:family'),InlineKeyboardButton(text='🧠 پرورش ذهن',callback_data='training:mind')],
     ])
+
+
+@router.message(Command('mind'))
+@router.message(F.text=='🧠 پرورش ذهن')
+@router.message(F.text=='پرورش ذهن')
+async def mind_training(message:Message):
+    await ensure_user(message.from_user.id, message.from_user.full_name)
+    ok, result = await train_mind(message.from_user.id)
+    if not ok:
+        return await message.answer(f'🧠 {result}')
+    u = await get_user(message.from_user.id)
+    await message.answer(
+        f'🧠 <b>تمرین ذهن با موفقیت انجام شد!</b>\n\n'
+        f'✨ قدرت ذهن: +{result}\n'
+        f'🏅 امتیاز تمرین: {u["training_points"]}\n'
+        f'✨ XP: +{5 + result}\n'
+        f'💠 انرژی باقی‌مانده: {u["energy"]}'
+    )
+
+@router.callback_query(F.data=='training:mind')
+async def mind_training_cb(call:CallbackQuery):
+    await mind_training(call.message)
+    await call.answer()
+
+@router.message(Command('stats'))
+async def training_stats(message:Message):
+    await ensure_user(message.from_user.id, message.from_user.full_name)
+    u=await get_user(message.from_user.id)
+    await message.answer(
+        f'📈 <b>آمار رشد شخصیت</b>\n\n'
+        f'🧠 قدرت ذهن: {u["mind_power"]}\n'
+        f'💪 قدرت جسم: {u["body_power"]}\n'
+        f'🔮 قدرت روح: {u["spirit_power"]}\n'
+        f'🏅 امتیاز تمرین: {u["training_points"]}\n'
+        f'⭐ سطح: {u["level"]}'
+    )
 
 @router.message(Command('profile'))
 @router.message(F.text=='👤 پروفایل')
 async def profile(message:Message):
     await ensure_user(message.from_user.id,message.from_user.full_name); u=await get_user(message.from_user.id)
-    await message.answer(f'''👤 <b>پروفایل راهنمای ارواح</b>\n\nنام: {u['name']}\n⭐ سطح راهنمایی: {u['level']}\n✨ تجربه: {u['xp']}\n❤️ سلامتی: {u['health']}/{u['max_health']}\n💠 انرژی روحی: {u['energy']}\n🪙 سکه: {u['coins']}\n🔮 کریستال سایه: {u['soul_gems']}\n✨ نور پسین: {u['light']}\n👻 ارواح راهی‌شده: {u['spirits_sent']}\n😈 پاک‌سازی‌ها: {u['cleanses']}''',reply_markup=main_game_kb())
+    await message.answer(f'''👤 <b>پروفایل راهنمای ارواح</b>\n\nنام: {u['name']}\n⭐ سطح راهنمایی: {u['level']}\n✨ تجربه: {u['xp']}\n❤️ سلامتی: {u['health']}/{u['max_health']}\n💠 انرژی روحی: {u['energy']}\n🪙 سکه: {u['coins']}\n🔮 کریستال سایه: {u['soul_gems']}\n✨ نور پسین: {u['light']}\n👻 ارواح راهی‌شده: {u['spirits_sent']}\n😈 پاک‌سازی‌ها: {u['cleanses']}
+🧠 قدرت ذهن: {u['mind_power']}
+💪 قدرت جسم: {u['body_power']}
+🔮 قدرت روح: {u['spirit_power']}
+🏅 امتیاز تمرین: {u['training_points']}''',reply_markup=main_game_kb())
 
 @router.message(Command('family'))
 @router.message(F.text=='💍 خانواده')

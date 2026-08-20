@@ -19,7 +19,12 @@ async def init_db():
             spirits_sent INTEGER NOT NULL DEFAULT 0,
             cleanses INTEGER NOT NULL DEFAULT 0,
             last_daily TEXT,
-            gender TEXT
+            gender TEXT,
+            mind_power INTEGER NOT NULL DEFAULT 1,
+            body_power INTEGER NOT NULL DEFAULT 1,
+            spirit_power INTEGER NOT NULL DEFAULT 1,
+            training_points INTEGER NOT NULL DEFAULT 0,
+            last_training TEXT
         );
 
         CREATE TABLE IF NOT EXISTS spirits (
@@ -198,6 +203,11 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN gender TEXT",
             "ALTER TABLE moderation ADD COLUMN ban_until TEXT",
             "ALTER TABLE moderation ADD COLUMN reason TEXT",
+            "ALTER TABLE users ADD COLUMN mind_power INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN body_power INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN spirit_power INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN training_points INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN last_training TEXT",
         ]:
             try:
                 await db.execute(statement)
@@ -353,7 +363,10 @@ async def get_role(user_id: int):
         row = await cur.fetchone()
         if row:
             return row[0]
-    return "سازنده" if user_id in __import__("config").ADMIN_IDS else "کاربر"
+    from config import CREATOR_ID, ADMIN_IDS
+    if user_id == CREATOR_ID:
+        return "ویژه"
+    return "سازنده" if user_id in ADMIN_IDS else "کاربر"
 
 async def set_role(user_id: int, role: str):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -776,3 +789,29 @@ async def care_for_child(user_id: int, child_id: int):
         await db.execute("UPDATE children SET happiness=MIN(100,happiness+10), health=MIN(100,health+5) WHERE id=?", (child_id,))
         await db.commit()
     return True
+
+
+async def train_mind(user_id: int):
+    """تمرین روزانه ذهن؛ یک بار در هر UTC day."""
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).date().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT energy, mind_power, training_points, last_training FROM users WHERE user_id=?", (user_id,))
+        u = await cur.fetchone()
+        if not u:
+            return False, "کاربر پیدا نشد."
+        if u["last_training"] == today:
+            return False, "امروز تمرین ذهن را انجام داده‌ای. فردا دوباره امتحان کن."
+        if u["energy"] < 2:
+            return False, "برای تمرین ذهن حداقل ۲ انرژی لازم داری."
+        gain = 1 + (u["training_points"] // 10)
+        await db.execute("UPDATE users SET energy=energy-2, mind_power=mind_power+?, training_points=training_points+1, xp=xp+?, last_training=? WHERE user_id=?", (gain, 5 + gain, today, user_id))
+        await db.commit()
+        return True, gain
+
+async def get_training_stats(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT mind_power, body_power, spirit_power, training_points FROM users WHERE user_id=?", (user_id,))
+        return await cur.fetchone()
