@@ -2,7 +2,7 @@ import random
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from database import (ensure_user,get_user,top_users,daily_claim,list_shop_items,get_shop_item,buy_shop_item,get_inventory,
+from database import (ensure_user,get_user,top_users,daily_claim,list_shop_items,get_shop_item,buy_shop_item,get_inventory,use_inventory_item,
     list_regions,get_region,list_story_spirits,get_story_spirit,get_next_clue,advance_spirit,list_demons,get_demon,get_or_create_encounter,update_encounter,add_progress,
     create_marriage_proposal,get_pending_proposal,respond_marriage,get_marriage,list_children,adopt_child,care_for_child,train_mind,get_training_stats)
 
@@ -23,9 +23,9 @@ async def mind_training(message:Message):
     await ensure_user(message.from_user.id, message.from_user.full_name)
     ok, result = await train_mind(message.from_user.id)
     if not ok:
-        return await message.answer(f'🧠 {result}')
+        return await message.reply(f'🧠 {result}')
     u = await get_user(message.from_user.id)
-    await message.answer(
+    await message.reply(
         f'🧠 <b>تمرین ذهن با موفقیت انجام شد!</b>\n\n'
         f'✨ قدرت ذهن: +{result}\n'
         f'🏅 امتیاز تمرین: {u["training_points"]}\n'
@@ -42,7 +42,7 @@ async def mind_training_cb(call:CallbackQuery):
 async def training_stats(message:Message):
     await ensure_user(message.from_user.id, message.from_user.full_name)
     u=await get_user(message.from_user.id)
-    await message.answer(
+    await message.reply(
         f'📈 <b>آمار رشد شخصیت</b>\n\n'
         f'🧠 قدرت ذهن: {u["mind_power"]}\n'
         f'💪 قدرت جسم: {u["body_power"]}\n'
@@ -55,7 +55,7 @@ async def training_stats(message:Message):
 @router.message(F.text=='👤 پروفایل')
 async def profile(message:Message):
     await ensure_user(message.from_user.id,message.from_user.full_name); u=await get_user(message.from_user.id)
-    await message.answer(f'''👤 <b>پروفایل راهنمای ارواح</b>\n\nنام: {u['name']}\n⭐ سطح راهنمایی: {u['level']}\n✨ تجربه: {u['xp']}\n❤️ سلامتی: {u['health']}/{u['max_health']}\n💠 انرژی روحی: {u['energy']}\n🪙 سکه: {u['coins']}\n🔮 کریستال سایه: {u['soul_gems']}\n✨ نور پسین: {u['light']}\n👻 ارواح راهی‌شده: {u['spirits_sent']}\n😈 پاک‌سازی‌ها: {u['cleanses']}
+    await message.reply(f'''👤 <b>پروفایل راهنمای ارواح</b>\n\nنام: {u['name']}\n⭐ سطح راهنمایی: {u['level']}\n✨ تجربه: {u['xp']}\n❤️ سلامتی: {u['health']}/{u['max_health']}\n💠 انرژی روحی: {u['energy']}\n🪙 سکه: {u['coins']}\n🔮 کریستال سایه: {u['soul_gems']}\n✨ نور پسین: {u['light']}\n👻 ارواح راهی‌شده: {u['spirits_sent']}\n😈 پاک‌سازی‌ها: {u['cleanses']}
 🧠 قدرت ذهن: {u['mind_power']}
 💪 قدرت جسم: {u['body_power']}
 🔮 قدرت روح: {u['spirit_power']}
@@ -79,23 +79,23 @@ async def family(message:Message):
     if children:
         text+='\n'.join(f"👶 {c['name']} | سن: {c['age']} | 😊 {c['happiness']}% | ❤️ {c['health']}%" for c in children)
     text+='\n\nبرای پذیرش فرزند: /adopt نام_کودک'
-    await message.answer(text,reply_markup=main_game_kb())
+    await message.reply(text,reply_markup=main_game_kb())
 
 @router.message(Command('marry'))
 async def marry(message:Message):
     parts=message.text.split()
     if len(parts)!=2 or not parts[1].isdigit():
-        return await message.answer('💍 استفاده: /marry شناسه_بازیکن')
+        return await message.reply('💍 استفاده: /marry شناسه_بازیکن')
     ok,msg=await create_marriage_proposal(message.from_user.id,int(parts[1]))
     if not ok:
-        return await message.answer('❌ '+msg)
+        return await message.reply('❌ '+msg)
     target=await get_user(int(parts[1]))
     kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='💍 قبول',callback_data=f'marry_accept:{message.from_user.id}'),InlineKeyboardButton(text='❌ رد',callback_data=f'marry_reject:{message.from_user.id}')]])
     try:
         await message.bot.send_message(int(parts[1]), f"💍 {message.from_user.full_name} برای ازدواج با تو پیشنهاد فرستاده است.\n\nبرای تصمیم‌گیری یکی از گزینه‌ها را انتخاب کن.", reply_markup=kb)
-        await message.answer('✅ پیشنهاد ازدواج برای بازیکن موردنظر ارسال شد.')
+        await message.reply('✅ پیشنهاد ازدواج برای بازیکن موردنظر ارسال شد.')
     except Exception:
-        await message.answer('⚠️ پیشنهاد ثبت شد، اما نتوانستم پیام مستقیم برای بازیکن بفرستم. او باید قبلاً ربات را شروع کرده باشد.')
+        await message.reply('⚠️ پیشنهاد ثبت شد، اما نتوانستم پیام مستقیم برای بازیکن بفرستم. او باید قبلاً ربات را شروع کرده باشد.')
 
 async def _respond_marriage(call:CallbackQuery, accept:bool):
     try:
@@ -125,11 +125,11 @@ async def marry_reject(call:CallbackQuery):
 async def adopt(message:Message):
     parts=message.text.split(maxsplit=1)
     if len(parts)!=2:
-        return await message.answer('👶 استفاده: /adopt نام_کودک')
+        return await message.reply('👶 استفاده: /adopt نام_کودک')
     ok,name=await adopt_child(message.from_user.id,parts[1])
     if not ok:
-        return await message.answer('❌ '+name)
-    await message.answer(f'👶 سرپرستی {name} با موفقیت ثبت شد.\n\nاز بخش «💍 خانواده» می‌توانی وضعیت کودک را ببینی و از او مراقبت کنی.')
+        return await message.reply('❌ '+name)
+    await message.reply(f'👶 سرپرستی {name} با موفقیت ثبت شد.\n\nاز بخش «💍 خانواده» می‌توانی وضعیت کودک را ببینی و از او مراقبت کنی.')
 
 @router.callback_query(F.data=='world:family')
 async def family_cb(call:CallbackQuery):
@@ -143,7 +143,7 @@ async def world(message:Message):
     buttons=[]
     for r in rows:
         lock=u['level']<r['unlock_level']; buttons.append([InlineKeyboardButton(text=('🔒 ' if lock else '🗺️ ')+r['name']+f' | سطح {r["unlock_level"]}',callback_data=f'region:{r["id"]}')])
-    await message.answer('🗺️ <b>جهان راهنمای ارواح</b>\n\nهر منطقه داستان‌ها و موجودات مخصوص خودش را دارد.',reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await message.reply('🗺️ <b>جهان راهنمای ارواح</b>\n\nهر منطقه داستان‌ها و موجودات مخصوص خودش را دارد.',reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 @router.callback_query(F.data.startswith('region:'))
 async def region(call:CallbackQuery):
@@ -225,7 +225,7 @@ async def region_demons(call:CallbackQuery):
 
 @router.message(F.text=='😈 جن‌ها')
 async def demons_message(message:Message):
-    rows=await list_demons(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f"demon:{d['id']}")] for d in rows]); await message.answer('😈 <b>دفتر موجودات</b>',reply_markup=kb)
+    rows=await list_demons(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f"demon:{d['id']}")] for d in rows]); await message.reply('😈 <b>دفتر موجودات</b>',reply_markup=kb)
 
 @router.callback_query(F.data=='world:demons')
 async def demons(call:CallbackQuery):
@@ -267,13 +267,13 @@ async def dclean(call:CallbackQuery):
 @router.message(Command('daily'))
 @router.message(F.text=='🎁 جایزه روزانه')
 async def daily(message:Message):
-    if await daily_claim(message.from_user.id): await message.answer('🎁 پاداش روزانه دریافت شد!\n🪙 +100 سکه\n💠 +5 انرژی')
-    else: await message.answer('⏳ پاداش امروز را قبلاً گرفته‌ای.')
+    if await daily_claim(message.from_user.id): await message.reply('🎁 پاداش روزانه دریافت شد!\n🪙 +100 سکه\n💠 +5 انرژی')
+    else: await message.reply('⏳ پاداش امروز را قبلاً گرفته‌ای.')
 
 @router.message(Command('shop'))
 @router.message(F.text=='🛒 فروشگاه')
 async def shop(message:Message):
-    rows=await list_shop_items(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"{r['name']} | 🪙{r['price_coins']} 💎{r['price_gems']}",callback_data=f'shop:{r["id"]}')] for r in rows]); await message.answer('🛒 <b>فروشگاه</b>',reply_markup=kb)
+    rows=await list_shop_items(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"{r['name']} | 🪙{r['price_coins']} 💎{r['price_gems']}",callback_data=f'shop:{r["id"]}')] for r in rows]); await message.reply('🛒 <b>فروشگاه</b>',reply_markup=kb)
 
 @router.callback_query(F.data.startswith('shop:'))
 async def shop_detail(call:CallbackQuery):
@@ -285,22 +285,53 @@ async def shop_detail(call:CallbackQuery):
 @router.callback_query(F.data.startswith('buy:'))
 async def buy(call:CallbackQuery):
     ok,res=await buy_shop_item(call.from_user.id,int(call.data.split(':')[1])); await call.answer('خرید انجام شد 🛒' if ok else 'سکه/کریستال کافی نیست.',show_alert=not ok)
-    if ok: await call.message.answer(f"✅ {res['name']} به کوله‌پشتی اضافه شد.")
+    if ok: await call.message.reply(f"✅ {res['name']} به کوله‌پشتی اضافه شد.")
 
 @router.callback_query(F.data=='shopback')
 async def shopback(call:CallbackQuery):
     await shop(call.message); await call.answer()
 
+def inventory_markup(rows):
+    buttons = []
+    for r in rows:
+        buttons.append([InlineKeyboardButton(text=f"🧪 استفاده: {r['name']} × {r['quantity']}", callback_data=f"useitem:{r['item_id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+async def render_inventory_message(message: Message, edit=False):
+    rows = await get_inventory(message.from_user.id)
+    text = '🎒 <b>کوله‌پشتی</b>\n\n' + (''.join(f"{r['name']} × {r['quantity']}\n📝 {r['description']}\n\n" for r in rows) if rows else 'خالی است.')
+    kb = inventory_markup(rows)
+    if edit:
+        await message.edit_text(text, reply_markup=kb)
+    else:
+        await message.reply(text, reply_markup=kb, reply_to_message_id=message.message_id)
+
 @router.message(Command('inventory'))
 @router.message(F.text=='🎒 کوله‌پشتی')
 async def inventory(message:Message):
-    rows=await get_inventory(message.from_user.id); await message.answer('🎒 <b>کوله‌پشتی</b>\n\n'+(''.join(f"{r['name']} × {r['quantity']}\n" for r in rows) if rows else 'خالی است.'))
+    await render_inventory_message(message)
 
 @router.callback_query(F.data=='world:inventory')
 async def inventory_cb(call:CallbackQuery):
-    rows=await get_inventory(call.from_user.id); await call.message.edit_text('🎒 <b>کوله‌پشتی</b>\n\n'+(''.join(f"{r['name']} × {r['quantity']}\n" for r in rows) if rows else 'خالی است.')); await call.answer()
+    await render_inventory_message(call.message, edit=True); await call.answer()
+
+@router.callback_query(F.data.startswith('useitem:'))
+async def use_item(call:CallbackQuery):
+    try:
+        item_id = int(call.data.split(':', 1)[1])
+    except (ValueError, IndexError):
+        return await call.answer('آیتم نامعتبر است.', show_alert=True)
+    ok, result = await use_inventory_item(call.from_user.id, item_id)
+    if not ok:
+        return await call.answer(result, show_alert=True)
+    item = result['item']
+    await call.answer(f"{item['name']} مصرف شد.", show_alert=False)
+    await call.message.reply(
+        f"🧪 <b>آیتم استفاده شد</b>\n\n{item['name']}\n{result['effect']}\n📦 باقی‌مانده: {result['remaining']}",
+        reply_markup=inventory_markup(await get_inventory(call.from_user.id))
+    )
 
 @router.message(Command('rank'))
 @router.message(F.text=='🏆 رتبه‌بندی')
 async def rank(message:Message):
-    rows=await top_users(); await message.answer('🏆 <b>تالار راهنمایان</b>\n\n'+''.join(f"{i}. {r['name']} — سطح {r['level']} | 👻 {r['spirits_sent']} | 😈 {r['cleanses']}\n" for i,r in enumerate(rows,1)))
+    rows=await top_users(); await message.reply('🏆 <b>تالار راهنمایان</b>\n\n'+''.join(f"{i}. {r['name']} — سطح {r['level']} | 👻 {r['spirits_sent']} | 😈 {r['cleanses']}\n" for i,r in enumerate(rows,1)))

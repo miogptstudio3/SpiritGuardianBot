@@ -72,7 +72,7 @@ async def panel(message:Message):
         [InlineKeyboardButton(text="👑 رتبه‌ها",callback_data="adm:roles"),
          InlineKeyboardButton(text="📖 راهنما",callback_data="adm:help")]
     ])
-    await message.answer(f"⚙️ <b>پنل مدیریت</b>\n\n👑 رتبه: <b>{role}</b>\nاز منو انتخاب کن:",reply_markup=kb)
+    await message.reply(f"⚙️ <b>پنل مدیریت</b>\n\n👑 رتبه: <b>{role}</b>\nاز منو انتخاب کن:",reply_markup=kb)
 
 @router.callback_query(F.data.startswith("adm:"))
 async def adm(call:CallbackQuery):
@@ -116,10 +116,10 @@ async def usersearch(message:Message):
     role=await get_role(message.from_user.id)
     if not can(role,"users"): return await deny(message)
     term=message.text.partition(" ")[2].strip()
-    if not term: return await message.answer("فرمت: /usersearch نام یا ID")
+    if not term: return await message.reply("فرمت: /usersearch نام یا ID")
     rows=await search_users(term)
-    if not rows: return await message.answer("🔎 کاربری پیدا نشد.")
-    await message.answer("🔎 <b>نتایج جستجو</b>\n\nکاربر را انتخاب کن:",reply_markup=user_buttons(rows))
+    if not rows: return await message.reply("🔎 کاربری پیدا نشد.")
+    await message.reply("🔎 <b>نتایج جستجو</b>\n\nکاربر را انتخاب کن:",reply_markup=user_buttons(rows))
 
 @router.callback_query(F.data.startswith("usr:"))
 async def user_page(call:CallbackQuery):
@@ -204,57 +204,57 @@ async def setgems(message:Message):
     role=await get_role(message.from_user.id)
     if not can(role,"give"): return await deny(message)
     p=message.text.split()
-    if len(p)!=3 or not p[1].isdigit() or not p[2].lstrip("-").isdigit(): return await message.answer("فرمت: /setgems ID مقدار")
+    if len(p)!=3 or not p[1].isdigit() or not p[2].lstrip("-").isdigit(): return await message.reply("فرمت: /setgems ID مقدار")
     uid,delta=int(p[1]),int(p[2])
-    if not await can_manage_target(message.from_user.id, uid): return await message.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
+    if not await can_manage_target(message.from_user.id, uid): return await message.reply("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
     await admin_update_user(uid,gems=delta); await add_admin_log(message.from_user.id,"تغییر کریستال",uid,str(delta))
-    await message.answer("💎 کریستال تغییر کرد.")
+    await message.reply("💎 کریستال تغییر کرد.")
 
 @router.message(Command("sethealth"))
 async def sethealth(message:Message):
     role=await get_role(message.from_user.id)
     if not can(role,"give"): return await deny(message)
     p=message.text.split()
-    if len(p)!=3 or not p[1].isdigit() or not p[2].isdigit(): return await message.answer("فرمت: /sethealth ID مقدار")
+    if len(p)!=3 or not p[1].isdigit() or not p[2].isdigit(): return await message.reply("فرمت: /sethealth ID مقدار")
     uid,h=int(p[1]),int(p[2])
-    if not await can_manage_target(message.from_user.id, uid): return await message.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
+    if not await can_manage_target(message.from_user.id, uid): return await message.reply("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
     await admin_update_user(uid,health=h); await add_admin_log(message.from_user.id,"تغییر سلامت",uid,str(h))
-    await message.answer("❤️ سلامتی تغییر کرد.")
+    await message.reply("❤️ سلامتی تغییر کرد.")
 
 @router.message(Command("setlevel"))
 async def setlevel(message:Message):
     role=await get_role(message.from_user.id)
     if not can(role,"setrole"): return await deny(message)
     p=message.text.split()
-    if len(p)!=3 or not p[1].isdigit() or not p[2].isdigit(): return await message.answer("فرمت: /setlevel ID سطح")
+    if len(p)!=3 or not p[1].isdigit() or not p[2].isdigit(): return await message.reply("فرمت: /setlevel ID سطح")
     uid,l=int(p[1]),int(p[2])
-    if not await can_manage_target(message.from_user.id, uid): return await message.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
+    if not await can_manage_target(message.from_user.id, uid): return await message.reply("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
     await admin_update_user(uid,level=l); await add_admin_log(message.from_user.id,"تغییر سطح",uid,str(l))
-    await message.answer("⭐ سطح تغییر کرد.")
+    await message.reply("⭐ سطح تغییر کرد.")
 
 @router.message(Command("warn"))
 async def warn(message:Message):
     role=await get_role(message.from_user.id)
     if not can(role,"ban"): return await deny(message)
     p=message.text.split(maxsplit=2)
-    if len(p)<3 or not p[1].isdigit(): return await message.answer("فرمت: /warn ID دلیل")
+    if len(p)<3 or not p[1].isdigit(): return await message.reply("فرمت: /warn ID دلیل")
     uid,reason=int(p[1]),p[2]
-    if not await can_manage_target(message.from_user.id, uid): return await message.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را مدیریت کنی.")
+    if not await can_manage_target(message.from_user.id, uid): return await message.reply("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را مدیریت کنی.")
     await add_warning(uid,message.from_user.id,reason); await add_admin_log(message.from_user.id,"اخطار",uid,reason)
-    await message.answer("⚠️ اخطار ثبت شد.")
+    await message.reply("⚠️ اخطار ثبت شد.")
 
 @router.message(Command("tempban"))
 async def tempban(message:Message):
     role=await get_role(message.from_user.id)
     if not can(role,"ban"): return await deny(message)
     p=message.text.split(maxsplit=2)
-    if len(p)<3 or not p[1].isdigit() or not p[2].split()[0].isdigit(): return await message.answer("فرمت: /tempban ID دقیقه دلیل")
+    if len(p)<3 or not p[1].isdigit() or not p[2].split()[0].isdigit(): return await message.reply("فرمت: /tempban ID دقیقه دلیل")
     uid=int(p[1]); mins=int(p[2].split()[0]); reason=" ".join(p[2].split()[1:]) or "بدون دلیل"
     target_role=await get_role(uid)
-    if ROLE_LEVELS[target_role]>=ROLE_LEVELS[role]: return await message.answer("⛔ این کاربر رتبه هم‌سطح یا بالاتر دارد.")
+    if ROLE_LEVELS[target_role]>=ROLE_LEVELS[role]: return await message.reply("⛔ این کاربر رتبه هم‌سطح یا بالاتر دارد.")
     until=(datetime.now(timezone.utc)+timedelta(minutes=mins)).isoformat()
     await set_temporary_ban(uid,until,reason); await add_admin_log(message.from_user.id,"بن موقت",uid,f"{mins} دقیقه: {reason}")
-    await message.answer(f"🚫 کاربر به مدت {mins} دقیقه بن شد.")
+    await message.reply(f"🚫 کاربر به مدت {mins} دقیقه بن شد.")
 
 @router.message(Command("adminlogs"))
 async def adminlogs(message:Message):
@@ -262,4 +262,4 @@ async def adminlogs(message:Message):
     if not can(role,"users"): return await deny(message)
     rows=await get_admin_logs()
     t="📜 <b>لاگ مدیران</b>\n\n"+"".join(f"{x['created_at']} | {x['admin_id']} | {x['action']} | {x['target_id'] or '-'} | {x['details'] or ''}\n" for x in rows)
-    await message.answer(t[:4000] or "لاگ خالی است.")
+    await message.reply(t[:4000] or "لاگ خالی است.")

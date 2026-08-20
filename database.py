@@ -499,6 +499,60 @@ async def buy_shop_item(user_id: int, item_id: int):
         await db.commit()
         return True, item
 
+async def use_inventory_item(user_id: int, item_id: int):
+    """مصرف واقعی یک آیتم از کیف و اعمال اثر آن به صورت اتمیک."""
+    import random
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT i.quantity, s.* FROM inventory i
+               JOIN shop_items s ON s.id=i.item_id
+               WHERE i.user_id=? AND i.item_id=? AND i.quantity>0 AND s.active=1""",
+            (user_id, item_id)
+        )
+        item = await cur.fetchone()
+        if not item:
+            return False, "این آیتم در کیف تو وجود ندارد."
+
+        cur = await db.execute("SELECT energy, health, max_health FROM users WHERE user_id=?", (user_id,))
+        user = await cur.fetchone()
+        if not user:
+            return False, "کاربر پیدا نشد."
+
+        # جعبه اسرار: با مصرف آن یک آیتم تصادفی دیگر می‌گیری.
+        if "جعبه اسرار" in item["name"]:
+            cur = await db.execute("SELECT * FROM shop_items WHERE active=1 AND id<>? ORDER BY RANDOM() LIMIT 1", (item_id,))
+            reward = await cur.fetchone()
+            if not reward:
+                return False, "فعلاً آیتم جایزه‌ای وجود ندارد."
+            await db.execute(
+                """INSERT INTO inventory(user_id,item_id,quantity) VALUES (?,?,?)
+                   ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""",
+                (user_id, reward["id"], reward["quantity"])
+            )
+            effect_text = f"🎁 جایزه تصادفی: {reward['name']} × {reward['quantity']}"
+        else:
+            changes = []
+            if item["energy_gain"]:
+                await db.execute("UPDATE users SET energy=energy+? WHERE user_id=?", (item["energy_gain"], user_id))
+                changes.append(f"💠 +{item['energy_gain']} انرژی")
+            if item["mission_bonus"]:
+                await db.execute("UPDATE users SET spirit_power=spirit_power+? WHERE user_id=?", (item["mission_bonus"], user_id))
+                changes.append(f"🔮 +{item['mission_bonus']} قدرت روح")
+            # اگر آیتم هیچ اثر عددی نداشت، حداقل XP کمی برای استفاده بده.
+            if not changes:
+                await db.execute("UPDATE users SET xp=xp+5 WHERE user_id=?", (user_id,))
+                changes.append("✨ +5 XP")
+            effect_text = " | ".join(changes)
+
+        new_qty = item["quantity"] - 1
+        if new_qty <= 0:
+            await db.execute("DELETE FROM inventory WHERE user_id=? AND item_id=?", (user_id, item_id))
+        else:
+            await db.execute("UPDATE inventory SET quantity=? WHERE user_id=? AND item_id=?", (new_qty, user_id, item_id))
+        await db.commit()
+        return True, {"item": item, "effect": effect_text, "remaining": max(0, new_qty)}
+
 async def get_inventory(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

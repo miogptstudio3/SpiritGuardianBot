@@ -38,9 +38,9 @@ async def start(message: Message):
             InlineKeyboardButton(text="♂️ مرد", callback_data="gender:male"),
             InlineKeyboardButton(text="♀️ زن", callback_data="gender:female")
         ]])
-        await message.answer("🧬 <b>انتخاب جنسیت شخصیت</b>\n\nجنسیت شخصیتت را انتخاب کن:", reply_markup=kb)
+        await message.reply("🧬 <b>انتخاب جنسیت شخصیت</b>\n\nجنسیت شخصیتت را انتخاب کن:", reply_markup=kb)
         return
-    await message.answer(WELCOME, reply_markup=menu())
+    await message.reply(WELCOME, reply_markup=menu())
 
 @router.callback_query(F.data.startswith("gender:"))
 async def choose_gender(call: CallbackQuery):
@@ -57,7 +57,7 @@ async def choose_gender(call: CallbackQuery):
 @router.message(Command("help"))
 @router.message(F.text == "❓ راهنما")
 async def help_cmd(message: Message):
-    await message.answer(
+    await message.reply(
         "📖 <b>راهنما</b>\n\n"
         "👻 ارواح — فهرست روح‌های فعال\n"
         "😈 جن‌ها — موجودات و پرونده‌های پاک‌سازی\n"
