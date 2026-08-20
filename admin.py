@@ -18,6 +18,18 @@ def can(role,p): return p in ROLE_PERMISSIONS.get(role,set())
 async def deny(event):
     await event.answer("⛔ دسترسی کافی نداری.",show_alert=True)
 
+async def require_perm(event, perm):
+    role = await get_role(event.from_user.id)
+    if not can(role, perm):
+        await deny(event)
+        return None
+    return role
+
+async def can_manage_target(actor_id, target_id):
+    actor_role = await get_role(actor_id)
+    target_role = await get_role(target_id)
+    return ROLE_LEVELS.get(actor_role, 0) > ROLE_LEVELS.get(target_role, 0)
+
 def back():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 پنل مدیریت",callback_data="adm:home")]
@@ -64,7 +76,8 @@ async def panel(message:Message):
 async def adm(call:CallbackQuery):
     role=await get_role(call.from_user.id); a=call.data.split(":")[1]
     perms={"stats":"stats","users":"users","staff":"users","logs":"users","spirits":"addspirit","shop":"addspirit","roles":"setrole","help":"panel"}
-    if a in perms and not can(role,perms[a]): return await deny(call)
+    required = perms.get(a, "panel" if a == "home" else None)
+    if required and not can(role, required): return await deny(call)
     if a=="home":
         await call.message.edit_text("⚙️ <b>پنل مدیریت</b>\n\nیک بخش را انتخاب کن:",reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📊 آمار",callback_data="adm:stats"),InlineKeyboardButton(text="👥 کاربران",callback_data="adm:users")],
@@ -168,9 +181,13 @@ async def ban_help(call:CallbackQuery):
     _,uid,kind=call.data.split(":")
     uid=int(uid)
     if kind=="clear":
+        if not await can_manage_target(call.from_user.id, uid):
+            return await call.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را مدیریت کنی.", show_alert=True)
         await clear_ban(uid); await add_admin_log(call.from_user.id,"رفع بن",uid,"از پنل")
         await call.message.edit_text("♻️ بن کاربر برداشته شد.",reply_markup=user_panel(uid))
     else:
+        if not await can_manage_target(call.from_user.id, uid):
+            return await call.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را مدیریت کنی.", show_alert=True)
         await call.message.edit_text(f"🚫 بن موقت <code>{uid}</code>\n\n/tempban {uid} دقیقه دلیل",reply_markup=user_panel(uid))
     await call.answer()
 
@@ -181,7 +198,9 @@ async def setgems(message:Message):
     if not can(role,"give"): return await deny(message)
     p=message.text.split()
     if len(p)!=3 or not p[1].isdigit() or not p[2].lstrip("-").isdigit(): return await message.answer("فرمت: /setgems ID مقدار")
-    uid,delta=int(p[1]),int(p[2]); await admin_update_user(uid,gems=delta); await add_admin_log(message.from_user.id,"تغییر کریستال",uid,str(delta))
+    uid,delta=int(p[1]),int(p[2])
+    if not await can_manage_target(message.from_user.id, uid): return await message.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
+    await admin_update_user(uid,gems=delta); await add_admin_log(message.from_user.id,"تغییر کریستال",uid,str(delta))
     await message.answer("💎 کریستال تغییر کرد.")
 
 @router.message(Command("sethealth"))
@@ -190,7 +209,9 @@ async def sethealth(message:Message):
     if not can(role,"give"): return await deny(message)
     p=message.text.split()
     if len(p)!=3 or not p[1].isdigit() or not p[2].isdigit(): return await message.answer("فرمت: /sethealth ID مقدار")
-    uid,h=int(p[1]),int(p[2]); await admin_update_user(uid,health=h); await add_admin_log(message.from_user.id,"تغییر سلامت",uid,str(h))
+    uid,h=int(p[1]),int(p[2])
+    if not await can_manage_target(message.from_user.id, uid): return await message.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
+    await admin_update_user(uid,health=h); await add_admin_log(message.from_user.id,"تغییر سلامت",uid,str(h))
     await message.answer("❤️ سلامتی تغییر کرد.")
 
 @router.message(Command("setlevel"))
@@ -199,7 +220,9 @@ async def setlevel(message:Message):
     if not can(role,"setrole"): return await deny(message)
     p=message.text.split()
     if len(p)!=3 or not p[1].isdigit() or not p[2].isdigit(): return await message.answer("فرمت: /setlevel ID سطح")
-    uid,l=int(p[1]),int(p[2]); await admin_update_user(uid,level=l); await add_admin_log(message.from_user.id,"تغییر سطح",uid,str(l))
+    uid,l=int(p[1]),int(p[2])
+    if not await can_manage_target(message.from_user.id, uid): return await message.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را تغییر بدهی.")
+    await admin_update_user(uid,level=l); await add_admin_log(message.from_user.id,"تغییر سطح",uid,str(l))
     await message.answer("⭐ سطح تغییر کرد.")
 
 @router.message(Command("warn"))
@@ -208,7 +231,9 @@ async def warn(message:Message):
     if not can(role,"ban"): return await deny(message)
     p=message.text.split(maxsplit=2)
     if len(p)<3 or not p[1].isdigit(): return await message.answer("فرمت: /warn ID دلیل")
-    uid,reason=int(p[1]),p[2]; await add_warning(uid,message.from_user.id,reason); await add_admin_log(message.from_user.id,"اخطار",uid,reason)
+    uid,reason=int(p[1]),p[2]
+    if not await can_manage_target(message.from_user.id, uid): return await message.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را مدیریت کنی.")
+    await add_warning(uid,message.from_user.id,reason); await add_admin_log(message.from_user.id,"اخطار",uid,reason)
     await message.answer("⚠️ اخطار ثبت شد.")
 
 @router.message(Command("tempban"))
