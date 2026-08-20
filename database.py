@@ -1,7 +1,12 @@
 import aiosqlite
+import os
 from datetime import datetime, timezone
 
-DB_PATH = "spirits.db"
+# Render's local filesystem is ephemeral. If a persistent disk is mounted at
+# /var/data, keep the SQLite database there so player progress survives deploys.
+# You can override this with DB_PATH in Render Environment Variables.
+DEFAULT_DB_PATH = "/var/data/spirits.db" if os.path.isdir("/var/data") else "spirits.db"
+DB_PATH = os.getenv("DB_PATH", DEFAULT_DB_PATH)
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -261,6 +266,74 @@ async def init_db():
                 ("starting_coins",100,"سکه شروع"),("starting_energy",10,"انرژی شروع"),("starting_gems",0,"کریستال شروع"),("starting_light",0,"نور پسین"),
                 ("daily_coins",100,"پاداش روزانه سکه"),("daily_energy",5,"پاداش روزانه انرژی")
             ])
+
+        # داستان‌های جدید و سخت‌تر — INSERT شرطی تا با دیتابیس قدیمی هم اضافه شوند.
+        extra_stories = [
+            ("راز ناقوس نیمه‌شب", 31, "روح نگهبان", 2, 4, "شناسایی صدای ناقوسی که هر شب پیش از ناپدیدشدن یک نفر شنیده می‌شود.",
+             "در جنگل مه‌آلود، ناقوسی بدون برج هر نیمه‌شب به صدا درمی‌آید. هرکس دنبال صدا برود، یک خاطره مهم را از دست می‌دهد.", 420, 300),
+            ("پرونده ساعت سیزدهم", 46, "روح زمان‌گمشده", 3, 5, "پیدا کردن ساعتی که سیزدهمین ضربه را ثبت می‌کند.",
+             "در شهر خاموش، همه ساعت‌ها روی یک زمان متوقف شده‌اند؛ جز ساعتی که گفته می‌شود می‌تواند یک تصمیم گذشته را آشکار کند.", 650, 500),
+            ("مهمان اتاق صفر", 27, "روح ناشناس", 4, 5, "کشف اینکه چه کسی هر شب وارد اتاق صفر می‌شود.",
+             "در گورستان قدیمی، نگهبان از اتاقی حرف می‌زند که در نقشه وجود ندارد. هر سرنخ، سرنخ قبلی را زیر سؤال می‌برد.", 720, 560),
+            ("نامه‌ای از زیر آب", 63, "روح غرق‌شده", 6, 6, "خواندن نامه‌ای که پس از سال‌ها از دهکده غرق‌شده بازگشته است.",
+             "نامه‌ای خشک و سالم از خانه‌ای بیرون می‌آید که دهه‌ها زیر آب بوده. نویسنده آن را با تاریخ فردا امضا کرده است.", 900, 720),
+            ("دادگاه سایه‌ها", 88, "روح داور", 7, 7, "تشخیص حقیقت میان سه خاطره متناقض.",
+             "در سرزمین سایه‌ها، سه روح ادعا می‌کنند صاحب یک خاطره واحد هستند. فقط یکی از روایت‌ها می‌تواند با شواهد سازگار باشد.", 1200, 950),
+        ]
+        for st in extra_stories:
+            cur = await db.execute("SELECT id FROM spirits_story WHERE name=?", (st[0],))
+            if not await cur.fetchone():
+                await db.execute(
+                    """INSERT INTO spirits_story
+                    (name,age,type,region_id,difficulty,status,request,story,reward_coins,reward_xp)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""", st)
+
+        extra_clues = {
+            "راز ناقوس نیمه‌شب": [
+                ("صدای ناقوس فقط وقتی شنیده می‌شود که مه از سمت شمال حرکت کند. چه چیزی را بررسی می‌کنی؟","🧭 جهت مه"),
+                ("روی تنه درختی علامتی دیده می‌شود که با زمان صدا همخوانی دارد.","🔎 علامت درخت"),
+                ("سه شاهد زمان متفاوتی گفته‌اند؛ کدام شاهد مسیر ناقوس را واقعاً دیده؟","🗣️ مقایسه شاهدها"),
+                ("ردپاها به جایی می‌رسند که هیچ ناقوسی در آن نیست.","🌫️ بررسی نقطه بی‌ناقوس"),
+            ],
+            "پرونده ساعت سیزدهم": [
+                ("ساعت فقط یک بار در شب سیزدهمین ضربه را می‌زند. چه چیزی با آن تغییر می‌کند؟","🕰️ بررسی عقربه‌ها"),
+                ("در دفتر شهر، همان روز یک نفر دو بار ثبت شده است.","📖 مقایسه دفتر"),
+                ("یکی از شاهدها زمان را عمداً یک ساعت عقب گفته است.","🗣️ بازجویی دقیق"),
+                ("عدد سیزده روی دیوار با نام یک ساختمان پاک‌شده همراه است.","🏙️ پیدا کردن ساختمان"),
+            ],
+            "مهمان اتاق صفر": [
+                ("در نقشه عمارت، بین اتاق ۱ و ۲ فاصله‌ای غیرعادی وجود دارد.","🗺️ بررسی نقشه"),
+                ("کلید اتاق صفر هیچ دندانه‌ای ندارد اما قفل را باز می‌کند.","🔑 بررسی کلید"),
+                ("مهمان هر بار پیش از ورود، نام یکی از نگهبانان را می‌گوید.","🗣️ مقایسه نام‌ها"),
+                ("دفتر نگهبان نشان می‌دهد یک نفر هیچ‌وقت در شیفت ثبت نشده است.","📚 بررسی دفتر نگهبان"),
+            ],
+            "نامه‌ای از زیر آب": [
+                ("کاغذ خشک است اما نمک آب در لبه آن باقی مانده.","🧂 بررسی نمک"),
+                ("تاریخ نامه یک روز جلوتر از تاریخ فعلی است.","📅 بررسی تاریخ"),
+                ("نام گیرنده با نامی روی زنگ خانه غرق‌شده یکسان است.","🔔 مقایسه نام"),
+                ("آخرین جمله نامه به چیزی اشاره می‌کند که هنوز ساخته نشده.","🏗️ بررسی نشانی"),
+            ],
+            "دادگاه سایه‌ها": [
+                ("هر سه روح یک خاطره را با جزئیات متفاوت تعریف می‌کنند.","⚖️ مقایسه روایت‌ها"),
+                ("فقط یکی از سه روایت با زمان طلوع ماه سازگار است.","🌙 بررسی زمان"),
+                ("یک شاهد در هر سه روایت حضور دارد، اما جای او متفاوت است.","🗣️ تطبیق شاهد"),
+                ("سند قدیمی یک نام را حذف کرده و نام دیگری را جایگزین کرده است.","📜 بررسی سند"),
+                ("حقیقت نه در قدیمی‌ترین روایت، بلکه در تنها شاهد بی‌طرف پنهان است.","🔍 یافتن شاهد بی‌طرف"),
+            ],
+        }
+        for story_name, clues in extra_clues.items():
+            cur = await db.execute("SELECT id FROM spirits_story WHERE name=?", (story_name,))
+            row = await cur.fetchone()
+            if row:
+                sid = row[0]
+                for order, (text, correct) in enumerate(clues, 1):
+                    cur = await db.execute(
+                        "SELECT id FROM spirit_clues WHERE spirit_id=? AND clue_order=?",
+                        (sid, order))
+                    if not await cur.fetchone():
+                        await db.execute(
+                            "INSERT INTO spirit_clues(spirit_id,clue_order,text,correct_option) VALUES (?,?,?,?)",
+                            (sid, order, text, correct))
 
         await db.commit()
 
@@ -557,7 +630,7 @@ async def get_inventory(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            """SELECT i.quantity, s.name, s.description, s.category
+            """SELECT i.item_id, i.quantity, s.name, s.description, s.category
                FROM inventory i JOIN shop_items s ON s.id=i.item_id
                WHERE i.user_id=? AND i.quantity>0 ORDER BY s.category, s.id""",
             (user_id,)
