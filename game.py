@@ -185,7 +185,7 @@ async def region_demons(call:CallbackQuery):
 
 @router.message(F.text=='😈 جن‌ها')
 async def demons_message(message:Message):
-    rows=await list_demons(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f'demon:{d['id']}')] for d in rows]); await message.answer('😈 <b>دفتر موجودات</b>',reply_markup=kb)
+    rows=await list_demons(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f"demon:{d['id']}")] for d in rows]); await message.answer('😈 <b>دفتر موجودات</b>',reply_markup=kb)
 
 @router.callback_query(F.data=='world:demons')
 async def demons(call:CallbackQuery):
