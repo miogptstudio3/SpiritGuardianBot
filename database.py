@@ -415,18 +415,27 @@ async def mark_spirit(user_id: int, spirit_id: int):
         return True
 
 async def daily_claim(user_id: int):
-    today = datetime.now(timezone.utc).date().isoformat()
+    """پاداش روزانه بر اساس روز تقویمی تهران (نه UTC)."""
+    try:
+        from zoneinfo import ZoneInfo
+        tehran = ZoneInfo("Asia/Tehran")
+        today = datetime.now(tehran).date().isoformat()
+    except Exception:
+        today = datetime.now(timezone.utc).date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT last_daily FROM users WHERE user_id=?", (user_id,))
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT last_daily, coins, energy FROM users WHERE user_id=?", (user_id,))
         row = await cur.fetchone()
-        if row and row[0] == today:
-            return False
+        if not row:
+            return False, "ابتدا /start بزن."
+        if row["last_daily"] == today:
+            return False, "پاداش امروز را قبلاً گرفته‌ای. فردا دوباره بیا."
         await db.execute(
-            "UPDATE users SET coins=coins+100, energy=energy+5, last_daily=? WHERE user_id=?",
+            "UPDATE users SET coins=coins+100, energy=MIN(100, energy+5), last_daily=? WHERE user_id=?",
             (today, user_id)
         )
         await db.commit()
-        return True
+        return True, "🎁 پاداش روزانه دریافت شد!\n🪙 +100 سکه\n💠 +5 انرژی"
 
 async def top_users(limit=10):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -929,21 +938,42 @@ async def care_for_child(user_id: int, child_id: int):
 
 
 async def train_mind(user_id: int):
-    """تمرین روزانه ذهن؛ یک بار در هر UTC day."""
-    from datetime import datetime, timezone
-    today = datetime.now(timezone.utc).date().isoformat()
+    """پرورش ذهن؛ هر ۵ دقیقه یک بار."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    cooldown = timedelta(minutes=5)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT energy, mind_power, training_points, last_training FROM users WHERE user_id=?", (user_id,))
         u = await cur.fetchone()
         if not u:
             return False, "کاربر پیدا نشد."
-        if u["last_training"] == today:
-            return False, "امروز تمرین ذهن را انجام داده‌ای. فردا دوباره امتحان کن."
+        last = u["last_training"]
+        if last:
+            try:
+                # پشتیبانی از فرمت قدیمی (فقط تاریخ) و جدید (ISO datetime)
+                if "T" in str(last) or " " in str(last):
+                    last_dt = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
+                else:
+                    # فرمت قدیمی روزانه — اجازه تمرین دوباره
+                    last_dt = None
+                if last_dt is not None:
+                    remaining = (last_dt + cooldown) - now
+                    if remaining.total_seconds() > 0:
+                        mins = int(remaining.total_seconds() // 60) + 1
+                        return False, f"هنوز {mins} دقیقه تا تمرین بعدی باقی مانده."
+            except Exception:
+                pass
         if u["energy"] < 2:
             return False, "برای تمرین ذهن حداقل ۲ انرژی لازم داری."
         gain = 1 + (u["training_points"] // 10)
-        await db.execute("UPDATE users SET energy=energy-2, mind_power=mind_power+?, training_points=training_points+1, xp=xp+?, last_training=? WHERE user_id=?", (gain, 5 + gain, today, user_id))
+        stamp = now.isoformat()
+        await db.execute(
+            "UPDATE users SET energy=energy-2, mind_power=mind_power+?, training_points=training_points+1, xp=xp+?, last_training=? WHERE user_id=?",
+            (gain, 5 + gain, stamp, user_id)
+        )
         await db.commit()
         return True, gain
 

@@ -267,3 +267,61 @@ async def adminlogs(message:Message):
     rows=await get_admin_logs()
     t="📜 <b>لاگ مدیران</b>\n\n"+"".join(f"{x['created_at']} | {x['admin_id']} | {x['action']} | {x['target_id'] or '-'} | {x['details'] or ''}\n" for x in rows)
     await message.reply(t[:4000] or "لاگ خالی است.")
+
+
+# ——— دستورات اختصاصی سازنده / ویژه ———
+
+VALID_ROLES = [r for r in ROLE_LEVELS.keys() if r != "کاربر"]
+
+@router.message(Command("addstaff"))
+@router.message(Command("setrole"))
+async def addstaff(message: Message):
+    """افزودن یا تغییر رتبه عضو تیم مدیریت با آیدی عددی.
+    فقط ویژه/سازنده اصلی.
+    فرمت: /addstaff ID رتبه
+    مثال: /addstaff 123456789 ادمین
+    """
+    role = await get_role(message.from_user.id)
+    if role != "ویژه" and message.from_user.id != CREATOR_ID:
+        return await deny(message)
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3 or not parts[1].lstrip("-").isdigit():
+        roles_list = " | ".join(VALID_ROLES)
+        return await message.reply(
+            "فرمت:\n<code>/addstaff آیدی_عددی رتبه</code>\n\n"
+            f"رتبه‌های مجاز:\n{roles_list}\n\n"
+            "مثال:\n<code>/addstaff 123456789 ادمین</code>"
+        )
+    uid = int(parts[1])
+    new_role = parts[2].strip()
+    if new_role not in ROLE_LEVELS or new_role == "کاربر":
+        return await message.reply("⛔ رتبه نامعتبر است. رتبه‌های مجاز: " + " | ".join(VALID_ROLES))
+    if uid == CREATOR_ID:
+        return await message.reply("🔒 حساب سازنده اصلی قابل تغییر نیست.")
+    # ویژه می‌تواند هر رتبه‌ای بدهد؛ بقیه فقط پایین‌تر از خودشان
+    actor_level = ROLE_LEVELS.get(role, 0)
+    target_level = ROLE_LEVELS.get(new_role, 0)
+    if role != "ویژه" and target_level >= actor_level:
+        return await message.reply("⛔ نمی‌توانی رتبه هم‌سطح یا بالاتر از خودت بدهی.")
+    await set_role(uid, new_role)
+    await add_admin_log(message.from_user.id, "افزودن/تغییر رتبه", uid, new_role)
+    await message.reply(
+        f"✅ کاربر <code>{uid}</code> با رتبه <b>{new_role}</b> به تیم مدیریت اضافه/به‌روز شد."
+    )
+
+
+@router.message(Command("removestaff"))
+async def removestaff_cmd(message: Message):
+    """حذف از تیم مدیریت. فقط ویژه."""
+    role = await get_role(message.from_user.id)
+    if role != "ویژه" and message.from_user.id != CREATOR_ID:
+        return await deny(message)
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
+        return await message.reply("فرمت: <code>/removestaff آیدی_عددی</code>")
+    uid = int(parts[1])
+    if uid == CREATOR_ID:
+        return await message.reply("🔒 حساب سازنده اصلی قابل حذف نیست.")
+    await remove_staff(uid)
+    await add_admin_log(message.from_user.id, "حذف از تیم مدیریت", uid, "")
+    await message.reply(f"♻️ کاربر <code>{uid}</code> از تیم مدیریت حذف شد.")

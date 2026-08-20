@@ -116,13 +116,32 @@ async def buy(request):
 
 async def train(request):
     u = await current_user(request)
-    today = date.today().isoformat()
-    if u['last_training'] == today:
-        raise web.HTTPBadRequest(text='امروز تمرین ذهن را انجام داده‌ای.')
+    # همان منطق ۵ دقیقه‌ای ربات
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    cooldown = timedelta(minutes=5)
+    last = u['last_training']
+    if last:
+        try:
+            if 'T' in str(last) or ' ' in str(last):
+                last_dt = datetime.fromisoformat(str(last).replace('Z', '+00:00'))
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                remaining = (last_dt + cooldown) - now
+                if remaining.total_seconds() > 0:
+                    mins = int(remaining.total_seconds() // 60) + 1
+                    raise web.HTTPBadRequest(text=f'هنوز {mins} دقیقه تا تمرین بعدی باقی مانده.')
+        except web.HTTPBadRequest:
+            raise
+        except Exception:
+            pass
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('UPDATE users SET mind_power=mind_power+1, training_points=training_points+1, xp=xp+25, last_training=? WHERE user_id=?',(today,u['user_id']))
+        await db.execute(
+            'UPDATE users SET mind_power=mind_power+1, training_points=training_points+1, xp=xp+25, last_training=? WHERE user_id=?',
+            (now.isoformat(), u['user_id'])
+        )
         await db.commit()
-    return web.json_response({'ok':True,'message':'پرورش ذهن انجام شد؛ قدرت ذهن +۱ و XP +۲۵'})
+    return web.json_response({'ok': True, 'message': 'پرورش ذهن انجام شد؛ قدرت ذهن +۱ و XP +۲۵ — تمرین بعدی بعد از ۵ دقیقه'})
 
 
 async def stories(request):

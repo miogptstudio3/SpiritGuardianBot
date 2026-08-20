@@ -30,7 +30,8 @@ async def mind_training(message:Message):
         f'✨ قدرت ذهن: +{result}\n'
         f'🏅 امتیاز تمرین: {u["training_points"]}\n'
         f'✨ XP: +{5 + result}\n'
-        f'💠 انرژی باقی‌مانده: {u["energy"]}'
+        f'💠 انرژی باقی‌مانده: {u["energy"]}\n\n'
+        f'⏳ تمرین بعدی بعد از ۵ دقیقه در دسترس است.'
     )
 
 @router.callback_query(F.data=='training:mind')
@@ -267,8 +268,12 @@ async def dclean(call:CallbackQuery):
 @router.message(Command('daily'))
 @router.message(F.text=='🎁 جایزه روزانه')
 async def daily(message:Message):
-    if await daily_claim(message.from_user.id): await message.reply('🎁 پاداش روزانه دریافت شد!\n🪙 +100 سکه\n💠 +5 انرژی')
-    else: await message.reply('⏳ پاداش امروز را قبلاً گرفته‌ای.')
+    await ensure_user(message.from_user.id, message.from_user.full_name)
+    ok, msg = await daily_claim(message.from_user.id)
+    if ok:
+        await message.reply(msg)
+    else:
+        await message.reply(f'⏳ {msg}')
 
 @router.message(Command('shop'))
 @router.message(F.text=='🛒 فروشگاه')
