@@ -64,6 +64,10 @@ function showTab(id) {
   if (id === "demons") loadDemons();
   if (id === "rank") loadRank();
   if (id === "upgrade") renderUpgrade();
+  if (id === "social") {
+    loadFamily();
+    loadChat();
+  }
 }
 
 document.querySelectorAll(".tabs button").forEach((b) => {
@@ -87,6 +91,8 @@ async function loadMe() {
   $("spiritsSent").textContent = me.spirits_sent;
   $("cleanses").textContent = me.cleanses;
   $("health").textContent = `${me.health}/${me.max_health}`;
+  if ($("hunger")) $("hunger").textContent = `${me.hunger ?? 100}/100`;
+  if ($("thirst")) $("thirst").textContent = `${me.thirst ?? 100}/100`;
   $("coinBonus").textContent = `+${me.coin_bonus_pct}٪`;
   renderUpgrade();
 }
@@ -166,12 +172,36 @@ async function loadDemons() {
             </p>
             <p class="muted">☠️ آلودگی: ${d.encounter_corruption}٪ • ❤️ ${d.encounter_health} • 🪙 ${d.reward_coins} / XP ${d.reward_xp}</p>
             <p>${d.story || ""}</p>
+            <div class="row-input">
+              ${
+                status === "completed"
+                  ? `<button onclick="fightDemon(${d.id},'reset')">🔄 مبارزه دوباره</button>`
+                  : `<button onclick="fightDemon(${d.id},'seal')">🔮 مهر</button>
+                     <button onclick="fightDemon(${d.id},'clean')">🕯️ پاک‌سازی</button>`
+              }
+            </div>
           </div>
         </article>`;
       })
       .join("");
   } catch (e) {
     notice(e.message, true);
+  }
+}
+
+async function fightDemon(id, action) {
+  try {
+    const x = await api(`/api/demons/${id}/fight`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    notice(x.message || "انجام شد");
+    haptic("ok");
+    await loadMe();
+    await loadDemons();
+  } catch (e) {
+    notice(e.message, true);
+    haptic("err");
   }
 }
 
@@ -216,6 +246,8 @@ async function loadShop() {
           <p>${x.description}</p>
           <p class="muted">🪙 ${x.price_coins} • 🔮 ${x.price_gems}
             ${x.energy_gain ? ` • ⚡ +${x.energy_gain}` : ""}
+            ${x.hunger_gain ? ` • 🍗 +${x.hunger_gain}` : ""}
+            ${x.thirst_gain ? ` • 💧 +${x.thirst_gain}` : ""}
             ${x.mission_bonus ? ` • ✨ +${x.mission_bonus}` : ""}
           </p>
         </div>
@@ -360,6 +392,67 @@ $("refresh").onclick = () => init(true);
 $("demonsRefresh").onclick = loadDemons;
 $("storiesRefresh").onclick = loadStories;
 $("invRefresh").onclick = loadInventory;
+
+/* ── Social: marry + chat ─────────────────────────── */
+async function loadChat() {
+  const withId = parseInt($("chatTo")?.value || "0", 10) || 0;
+  try {
+    const q = withId ? `?with=${withId}` : "";
+    const rows = await api("/api/chat" + q);
+    if (!rows.length) {
+      $("chatList").innerHTML = '<div class="empty">پیامی نیست.</div>';
+      return;
+    }
+    $("chatList").innerHTML = rows
+      .map(
+        (m) =>
+          `<div class="card item"><div class="meta"><p><b>${m.from_name}</b> → ${m.to_name}</p><p>${m.body}</p><p class="muted">${m.created_at || ""}</p></div></div>`
+      )
+      .join("");
+  } catch (e) {
+    $("chatList").innerHTML = `<div class="empty">${e.message}</div>`;
+  }
+}
+
+if ($("marryBtn")) {
+  $("marryBtn").onclick = async () => {
+    const target_id = parseInt($("marryId").value || "0", 10);
+    if (!target_id) return notice("آیدی را وارد کن", true);
+    try {
+      const x = await api("/api/marry", {
+        method: "POST",
+        body: JSON.stringify({ target_id }),
+      });
+      notice(x.message);
+      haptic("ok");
+      loadFamily();
+    } catch (e) {
+      notice(e.message, true);
+      haptic("err");
+    }
+  };
+}
+if ($("chatSend")) {
+  $("chatSend").onclick = async () => {
+    const to_id = parseInt($("chatTo").value || "0", 10);
+    const text = ($("chatText").value || "").trim();
+    if (!to_id || !text) return notice("آیدی و متن لازم است", true);
+    try {
+      const x = await api("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ to_id, text }),
+      });
+      notice(x.message);
+      $("chatText").value = "";
+      haptic("ok");
+      loadChat();
+    } catch (e) {
+      notice(e.message, true);
+      haptic("err");
+    }
+  };
+}
+if ($("chatRefresh")) $("chatRefresh").onclick = loadChat;
 
 /* ── Boot ─────────────────────────────────────────── */
 async function init(silent = false) {
