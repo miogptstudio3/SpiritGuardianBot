@@ -350,10 +350,13 @@ async def init_db():
 async def ensure_user(user_id: int, name: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO users(user_id, name, coins, energy, soul_gems) VALUES (?, ?, COALESCE((SELECT value FROM currencies WHERE key='starting_coins'),100), COALESCE((SELECT value FROM currencies WHERE key='starting_energy'),10), COALESCE((SELECT value FROM currencies WHERE key='starting_gems'),0))",
+            """INSERT INTO users(user_id, name, coins, energy, soul_gems)
+               VALUES (?, ?, COALESCE((SELECT value FROM currencies WHERE key='starting_coins'),100),
+                          COALESCE((SELECT value FROM currencies WHERE key='starting_energy'),10),
+                          COALESCE((SELECT value FROM currencies WHERE key='starting_gems'),0))
+               ON CONFLICT(user_id) DO UPDATE SET name=EXCLUDED.name""",
             (user_id, name[:80])
         )
-        await db.execute("UPDATE users SET name=? WHERE user_id=?", (name[:80], user_id))
         await db.commit()
 
 async def set_gender(user_id: int, gender: str):

@@ -78,7 +78,7 @@ async def current_user(request):
     if not row:
         name = user.get("first_name") or user.get("username") or "بازیکن"
         await db_exec(
-            "INSERT INTO users(user_id,name) VALUES(?,?)",
+            "INSERT INTO users(user_id,name) VALUES(?,?) ON CONFLICT(user_id) DO NOTHING",
             (user["id"], name[:80]),
         )
         row = await db_one("SELECT * FROM users WHERE user_id=?", (user["id"],))
