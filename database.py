@@ -12,7 +12,7 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
+            user_id BIGINT PRIMARY KEY,
             name TEXT NOT NULL,
             coins INTEGER NOT NULL DEFAULT 100,
             energy INTEGER NOT NULL DEFAULT 10,
@@ -44,20 +44,20 @@ async def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS user_spirits (
-            user_id INTEGER NOT NULL,
+            user_id BIGINT NOT NULL,
             spirit_id INTEGER NOT NULL,
             status TEXT NOT NULL DEFAULT 'active',
             PRIMARY KEY(user_id, spirit_id)
         );
 
         CREATE TABLE IF NOT EXISTS staff (
-            user_id INTEGER PRIMARY KEY,
+            user_id BIGINT PRIMARY KEY,
             role TEXT NOT NULL DEFAULT 'ادمین',
             added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS moderation (
-            user_id INTEGER PRIMARY KEY,
+            user_id BIGINT PRIMARY KEY,
             banned INTEGER NOT NULL DEFAULT 0,
             ban_until TEXT,
             reason TEXT
@@ -65,17 +65,17 @@ async def init_db():
 
         CREATE TABLE IF NOT EXISTS warnings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            admin_id INTEGER NOT NULL,
+            user_id BIGINT NOT NULL,
+            admin_id BIGINT NOT NULL,
             reason TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS admin_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            admin_id INTEGER NOT NULL,
+            admin_id BIGINT NOT NULL,
             action TEXT NOT NULL,
-            target_id INTEGER,
+            target_id BIGINT,
             details TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -94,7 +94,7 @@ async def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS inventory (
-            user_id INTEGER NOT NULL,
+            user_id BIGINT NOT NULL,
             item_id INTEGER NOT NULL,
             quantity INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(user_id, item_id)
@@ -116,7 +116,7 @@ async def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS spirit_progress (
-            user_id INTEGER NOT NULL, spirit_id INTEGER NOT NULL, clue_index INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active',
+            user_id BIGINT NOT NULL, spirit_id INTEGER NOT NULL, clue_index INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active',
             PRIMARY KEY(user_id, spirit_id)
         );
 
@@ -127,7 +127,7 @@ async def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS demon_encounters (
-            user_id INTEGER NOT NULL, demon_id INTEGER NOT NULL, health INTEGER NOT NULL, corruption INTEGER NOT NULL, stage INTEGER NOT NULL DEFAULT 1,
+            user_id BIGINT NOT NULL, demon_id INTEGER NOT NULL, health INTEGER NOT NULL, corruption INTEGER NOT NULL, stage INTEGER NOT NULL DEFAULT 1,
             status TEXT NOT NULL DEFAULT 'active', PRIMARY KEY(user_id, demon_id)
         );
 
@@ -137,8 +137,8 @@ async def init_db():
 
         CREATE TABLE IF NOT EXISTS marriages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user1_id INTEGER NOT NULL,
-            user2_id INTEGER NOT NULL,
+            user1_id BIGINT NOT NULL,
+            user2_id BIGINT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user1_id, user2_id)
@@ -146,8 +146,8 @@ async def init_db():
 
         CREATE TABLE IF NOT EXISTS children (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            parent1_id INTEGER NOT NULL,
-            parent2_id INTEGER,
+            parent1_id BIGINT NOT NULL,
+            parent2_id BIGINT,
             name TEXT NOT NULL,
             age INTEGER NOT NULL DEFAULT 0,
             happiness INTEGER NOT NULL DEFAULT 80,
@@ -199,6 +199,30 @@ async def init_db():
                     ("🎁 جعبه اسرار", "یک آیتم تصادفی از فروشگاه.", "💎 ویژه", 500, 5, 0, 10, 1),
                 ]
             )
+
+        # PostgreSQL migration: Telegram IDs can exceed a signed 32-bit integer.
+        # Keep all Telegram/user identifiers as BIGINT.
+        for statement in [
+            "ALTER TABLE users ALTER COLUMN user_id TYPE BIGINT",
+            "ALTER TABLE user_spirits ALTER COLUMN user_id TYPE BIGINT",
+            "ALTER TABLE staff ALTER COLUMN user_id TYPE BIGINT",
+            "ALTER TABLE moderation ALTER COLUMN user_id TYPE BIGINT",
+            "ALTER TABLE warnings ALTER COLUMN user_id TYPE BIGINT",
+            "ALTER TABLE warnings ALTER COLUMN admin_id TYPE BIGINT",
+            "ALTER TABLE admin_logs ALTER COLUMN admin_id TYPE BIGINT",
+            "ALTER TABLE admin_logs ALTER COLUMN target_id TYPE BIGINT",
+            "ALTER TABLE inventory ALTER COLUMN user_id TYPE BIGINT",
+            "ALTER TABLE spirit_progress ALTER COLUMN user_id TYPE BIGINT",
+            "ALTER TABLE demon_encounters ALTER COLUMN user_id TYPE BIGINT",
+            "ALTER TABLE marriages ALTER COLUMN user1_id TYPE BIGINT",
+            "ALTER TABLE marriages ALTER COLUMN user2_id TYPE BIGINT",
+            "ALTER TABLE children ALTER COLUMN parent1_id TYPE BIGINT",
+            "ALTER TABLE children ALTER COLUMN parent2_id TYPE BIGINT",
+        ]:
+            try:
+                await db.execute(statement)
+            except Exception:
+                pass
 
         # Migration for existing databases.
         for statement in [
