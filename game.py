@@ -483,7 +483,9 @@ async def shop_detail(call:CallbackQuery):
 
 @router.callback_query(F.data.startswith('buy:'))
 async def buy(call:CallbackQuery):
-    ok,res=await buy_shop_item(call.from_user.id,int(call.data.split(':')[1])); await call.answer('خرید انجام شد 🛒' if ok else 'سکه/کریستال کافی نیست.',show_alert=not ok)
+    await ensure_user(call.from_user.id, call.from_user.full_name)
+    ok,res=await buy_shop_item(call.from_user.id,int(call.data.split(':')[1]))
+    await call.answer('خرید انجام شد 🛒' if ok else ('آیتم پیدا نشد.' if res == 'item_not_found' else 'سکه/کریستال کافی نیست.'), show_alert=not ok)
     if ok: await call.message.reply(f"✅ {res['name']} به کوله‌پشتی اضافه شد.")
 
 @router.callback_query(F.data=='shopback')
@@ -512,7 +514,14 @@ async def inventory(message:Message):
 
 @router.callback_query(F.data=='world:inventory')
 async def inventory_cb(call:CallbackQuery):
-    await render_inventory_message(call.message, edit=True); await call.answer()
+    # callback.message belongs to the bot, so use callback.from_user for the owner.
+    rows = await get_inventory(call.from_user.id)
+    text = '🎒 <b>کوله‌پشتی</b>\n\n' + (
+        ''.join(f"{r['name']} × {r['quantity']}\n📝 {r['description']}\n\n" for r in rows)
+        if rows else 'خالی است.'
+    )
+    await call.message.edit_text(text, reply_markup=inventory_markup(rows))
+    await call.answer()
 
 @router.callback_query(F.data.startswith('useitem:'))
 async def use_item(call:CallbackQuery):
@@ -520,6 +529,7 @@ async def use_item(call:CallbackQuery):
         item_id = int(call.data.split(':', 1)[1])
     except (ValueError, IndexError):
         return await call.answer('آیتم نامعتبر است.', show_alert=True)
+    await ensure_user(call.from_user.id, call.from_user.full_name)
     ok, result = await use_inventory_item(call.from_user.id, item_id)
     if not ok:
         return await call.answer(result, show_alert=True)
