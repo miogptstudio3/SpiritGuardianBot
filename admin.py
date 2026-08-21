@@ -8,7 +8,8 @@ from database import (
     get_user_count, get_spirit_count, get_staff_list, admin_give,
     list_shop_items, search_users, get_full_user, admin_update_user,
     add_warning, get_warnings, set_temporary_ban, add_admin_log,
-    get_admin_logs, get_inventory_for_admin
+    get_admin_logs, get_inventory_for_admin, add_spirit, admin_add_shop_item,
+    ensure_user, get_user
 )
 
 router=Router()
@@ -20,7 +21,15 @@ def can(role, p):
     return p in ROLE_PERMISSIONS.get(role, set())
 
 async def deny(event):
-    await event.answer("⛔ دسترسی کافی نداری.",show_alert=True)
+    text = "⛔ دسترسی کافی نداری."
+    from aiogram.types import CallbackQuery
+    try:
+        if isinstance(event, CallbackQuery):
+            await event.answer(text, show_alert=True)
+        else:
+            await event.reply(text)
+    except Exception:
+        pass
 
 async def require_perm(event, perm):
     role = await get_role(event.from_user.id)
@@ -325,3 +334,125 @@ async def removestaff_cmd(message: Message):
     await remove_staff(uid)
     await add_admin_log(message.from_user.id, "حذف از تیم مدیریت", uid, "")
     await message.reply(f"♻️ کاربر <code>{uid}</code> از تیم مدیریت حذف شد.")
+
+
+@router.message(Command("give"))
+async def give_cmd(message: Message):
+    """فرمت: /give ID سکه انرژی"""
+    role = await require_perm(message, "give")
+    if role is None:
+        return
+    parts = message.text.split()
+    if len(parts) < 3 or not parts[1].lstrip("-").isdigit():
+        return await message.reply("فرمت: <code>/give آیدی سکه انرژی</code>\nمثال: /give 123456 100 5")
+    uid = int(parts[1])
+    if not await can_manage_target(message.from_user.id, uid):
+        return await message.reply("⛔ نمی‌توانی این کاربر را مدیریت کنی.")
+    try:
+        coins = int(parts[2]) if len(parts) > 2 else 0
+        energy = int(parts[3]) if len(parts) > 3 else 0
+    except ValueError:
+        return await message.reply("مقادیر سکه و انرژی باید عدد باشند.")
+    await ensure_user(uid, f"User{uid}")
+    await admin_give(uid, coins, energy)
+    await add_admin_log(message.from_user.id, "give", uid, f"coins={coins} energy={energy}")
+    await message.reply(f"✅ به کاربر <code>{uid}</code> داده شد:\n🪙 {coins} سکه\n💠 {energy} انرژی")
+
+
+@router.message(Command("ban"))
+async def ban_cmd(message: Message):
+    """فرمت: /ban ID [دلیل]"""
+    role = await require_perm(message, "ban")
+    if role is None:
+        return
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 2 or not parts[1].lstrip("-").isdigit():
+        return await message.reply("فرمت: <code>/ban آیدی [دلیل]</code>")
+    uid = int(parts[1])
+    if not await can_manage_target(message.from_user.id, uid):
+        return await message.reply("⛔ نمی‌توانی این کاربر را مدیریت کنی.")
+    if uid == CREATOR_ID:
+        return await message.reply("🔒 حساب سازنده اصلی قابل مسدودسازی نیست.")
+    reason = parts[2] if len(parts) > 2 else "بدون دلیل"
+    await set_ban(uid, True)
+    await add_admin_log(message.from_user.id, "ban", uid, reason)
+    await message.reply(f"🚫 کاربر <code>{uid}</code> مسدود شد.\nدلیل: {reason}")
+
+
+@router.message(Command("unban"))
+async def unban_cmd(message: Message):
+    """فرمت: /unban ID"""
+    role = await require_perm(message, "ban")
+    if role is None:
+        return
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
+        return await message.reply("فرمت: <code>/unban آیدی</code>")
+    uid = int(parts[1])
+    await clear_ban(uid)
+    await add_admin_log(message.from_user.id, "unban", uid, "")
+    await message.reply(f"✅ مسدودیت کاربر <code>{uid}</code> برداشته شد.")
+
+
+@router.message(Command("addspirit"))
+async def addspirit_cmd(message: Message):
+    """فرمت: /addspirit نام|توضیح|خواسته|سختی|سکه|XP"""
+    role = await require_perm(message, "addspirit")
+    if role is None:
+        return
+    raw = message.text.partition(" ")[2].strip()
+    parts = [p.strip() for p in raw.split("|")]
+    if len(parts) < 6:
+        return await message.reply(
+            "فرمت:\n<code>/addspirit نام|توضیح|خواسته|سختی|سکه|XP</code>\n"
+            "مثال: /addspirit روح گمشده|یک روح سرگردان|یافتن فرزندش|2|80|40"
+        )
+    try:
+        name, desc, request, diff, coins, xp = parts[0], parts[1], parts[2], int(parts[3]), int(parts[4]), int(parts[5])
+    except ValueError:
+        return await message.reply("سختی، سکه و XP باید عدد باشند.")
+    sid = await add_spirit(name, desc, request, diff, coins, xp)
+    await add_admin_log(message.from_user.id, "addspirit", None, f"{name} (id={sid})")
+    await message.reply(f"✅ روح جدید اضافه شد.\nID: <code>{sid}</code>\nنام: {name}")
+
+
+@router.message(Command("addshop"))
+async def addshop_cmd(message: Message):
+    """فرمت: /addshop نام|توضیح|دسته|سکه|کریستال|انرژی|بونوس"""
+    role = await require_perm(message, "shop")
+    if role is None:
+        return
+    raw = message.text.partition(" ")[2].strip()
+    parts = [p.strip() for p in raw.split("|")]
+    if len(parts) < 7:
+        return await message.reply(
+            "فرمت:\n<code>/addshop نام|توضیح|دسته|سکه|کریستال|انرژی|بونوس</code>\n"
+            "مثال: /addshop چای جدید|بازیابی انرژی|🍵 خوراکی|40|0|4|0"
+        )
+    try:
+        name, desc, cat = parts[0], parts[1], parts[2]
+        coins, gems, energy, bonus = int(parts[3]), int(parts[4]), int(parts[5]), int(parts[6])
+    except ValueError:
+        return await message.reply("مقادیر عددی (سکه، کریستال، انرژی، بونوس) باید عدد باشند.")
+    sid = await admin_add_shop_item(name, desc, cat, coins, gems, energy, bonus)
+    await add_admin_log(message.from_user.id, "addshop", None, f"{name} (id={sid})")
+    await message.reply(f"✅ آیتم فروشگاه اضافه شد.\nID: <code>{sid}</code>\nنام: {name}")
+
+
+@router.message(Command("broadcast"))
+async def broadcast_cmd(message: Message):
+    """فرمت: /broadcast متن پیام"""
+    role = await require_perm(message, "broadcast")
+    if role is None:
+        return
+    text = message.text.partition(" ")[2].strip()
+    if not text:
+        return await message.reply("فرمت: <code>/broadcast متن پیام</code>")
+    # برای سادگی فقط تأیید می‌کنیم؛ ارسال واقعی به همه کاربران می‌تواند سنگین باشد
+    # در نسخه کامل می‌توان از صف استفاده کرد.
+    await add_admin_log(message.from_user.id, "broadcast", None, text[:200])
+    await message.reply(
+        f"📢 پیام برای پخش آماده شد (لاگ ثبت شد):\n\n{text}\n\n"
+        "⚠️ ارسال انبوه به همه کاربران فعلاً برای جلوگیری از محدودیت تلگرام غیرفعال است. "
+        "در صورت نیاز از پنل یا اسکریپت جداگانه استفاده کنید."
+    )

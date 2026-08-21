@@ -23,11 +23,22 @@ def main_game_kb():
     ])
 
 
+async def _safe_user(user_id: int, name: str = "بازیکن"):
+    """اطمینان از وجود کاربر و برگرداندن ردیف؛ در صورت خطا None."""
+    try:
+        await ensure_user(user_id, name or "بازیکن")
+        return await get_user(user_id)
+    except Exception:
+        return None
+
+
 @router.message(Command('mind'))
 @router.message(F.text=='🧠 پرورش ذهن')
 @router.message(F.text=='پرورش ذهن')
 async def mind_training(message:Message):
-    await ensure_user(message.from_user.id, message.from_user.full_name)
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت اطلاعات کاربر. دوباره /start بزن.')
     ok, result = await train_mind(message.from_user.id)
     if not ok:
         return await message.reply(f'🧠 {result}')
@@ -41,15 +52,34 @@ async def mind_training(message:Message):
         f'⏳ تمرین بعدی بعد از ۵ دقیقه در دسترس است.'
     )
 
+
 @router.callback_query(F.data=='training:mind')
 async def mind_training_cb(call:CallbackQuery):
-    await mind_training(call.message)
+    # مهم: از call.from_user استفاده شود، نه call.message.from_user (که ربات است)
+    u = await _safe_user(call.from_user.id, call.from_user.full_name)
+    if not u:
+        return await call.answer('⚠️ ابتدا /start را بزن.', show_alert=True)
+    ok, result = await train_mind(call.from_user.id)
+    if not ok:
+        await call.answer(f'🧠 {result}', show_alert=True)
+        return
+    u = await get_user(call.from_user.id)
+    await call.message.answer(
+        f'🧠 <b>تمرین ذهن با موفقیت انجام شد!</b>\n\n'
+        f'✨ قدرت ذهن: +{result}\n'
+        f'🏅 امتیاز تمرین: {u["training_points"]}\n'
+        f'✨ XP: +{5 + result}\n'
+        f'💠 انرژی باقی‌مانده: {u["energy"]}\n\n'
+        f'⏳ تمرین بعدی بعد از ۵ دقیقه در دسترس است.'
+    )
     await call.answer()
+
 
 @router.message(Command('stats'))
 async def training_stats(message:Message):
-    await ensure_user(message.from_user.id, message.from_user.full_name)
-    u=await get_user(message.from_user.id)
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت اطلاعات. دوباره /start بزن.')
     await message.reply(
         f'📈 <b>آمار رشد شخصیت</b>\n\n'
         f'🧠 قدرت ذهن: {u["mind_power"]}\n'
@@ -59,11 +89,13 @@ async def training_stats(message:Message):
         f'⭐ سطح: {u["level"]}'
     )
 
+
 @router.message(Command('profile'))
 @router.message(F.text == '👤 پروفایل')
 async def profile(message: Message):
-    await ensure_user(message.from_user.id, message.from_user.full_name)
-    u = await get_user(message.from_user.id)
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت پروفایل. دوباره /start بزن.')
     boost = int(u['coin_boost'] or 0) if 'coin_boost' in u.keys() else 0
     bonus = min(boost * 5, 50)
     await message.reply(
@@ -76,7 +108,7 @@ async def profile(message: Message):
 💠 انرژی روحی: {u['energy']}
 🪙 سکه: {u['coins']}
 🔮 کریستال سایه: {u['soul_gems']}
-✨ نور پسین: {u['light']}
+✨ نور پسین: {u.get('light') or 0}
 💰 ارتقای سکه: سطح {boost}/10 (+{bonus}٪ پاداش)
 👻 ارواح راهی‌شده: {u['spirits_sent']}
 😈 پاک‌سازی‌ها: {u['cleanses']}
@@ -91,8 +123,9 @@ async def profile(message: Message):
 @router.message(F.text == '💰 ارتقای سکه')
 @router.message(F.text == 'ارتقای سکه')
 async def upgrade_coins_cmd(message: Message):
-    await ensure_user(message.from_user.id, message.from_user.full_name)
-    u = await get_user(message.from_user.id)
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت اطلاعات. دوباره /start بزن.')
     boost = int(u['coin_boost'] or 0) if 'coin_boost' in u.keys() else 0
     bonus = min(boost * 5, 50)
     next_cost_coins = int(500 * (1.6 ** boost)) if boost < 10 else 0
@@ -117,47 +150,70 @@ async def upgrade_coins_cmd(message: Message):
         ])
     await message.reply(text, reply_markup=kb)
 
+
 @router.callback_query(F.data == 'upgrade_coins_do')
 async def upgrade_coins_do(call: CallbackQuery):
+    await _safe_user(call.from_user.id, call.from_user.full_name)
     ok, msg = await upgrade_coin_boost(call.from_user.id)
     await call.answer('ارتقاء انجام شد ✅' if ok else 'ارتقاء ناموفق', show_alert=not ok)
-    await call.message.edit_text(msg if ok else f'❌ {msg}')
+    try:
+        await call.message.edit_text(msg if ok else f'❌ {msg}')
+    except Exception:
+        await call.message.answer(msg if ok else f'❌ {msg}')
+
 
 @router.message(Command('family'))
 @router.message(F.text=='💍 خانواده')
 async def family(message:Message):
-    u=await get_user(message.from_user.id)
-    marriage=await get_marriage(message.from_user.id)
-    children=await list_children(message.from_user.id)
-    text='💍 <b>خانواده</b>\n\n'
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت اطلاعات. دوباره /start بزن.')
+    marriage = await get_marriage(message.from_user.id)
+    children = await list_children(message.from_user.id) or []
+    text = '💍 <b>خانواده</b>\n\n'
     if marriage:
-        partner_id=marriage['user2_id'] if marriage['user1_id']==message.from_user.id else marriage['user1_id']
-        partner=await get_user(partner_id)
-        text+=f"💑 همسر: {partner['name'] if partner else partner_id}\n"
+        partner_id = marriage['user2_id'] if marriage['user1_id'] == message.from_user.id else marriage['user1_id']
+        partner = await get_user(partner_id)
+        text += f"💑 همسر: {partner['name'] if partner else partner_id}\n"
     else:
-        text+='💍 وضعیت: مجرد\n'
-        text+='برای پیشنهاد ازدواج: /marry شناسه_بازیکن\n'
-    text+=f"\n👶 فرزندان تحت سرپرستی: {len(children)}\n"
+        text += '💍 وضعیت: مجرد\n'
+        text += 'برای پیشنهاد ازدواج: /marry شناسه_بازیکن\n'
+    text += f"\n👶 فرزندان تحت سرپرستی: {len(children)}\n"
     if children:
-        text+='\n'.join(f"👶 {c['name']} | سن: {c['age']} | 😊 {c['happiness']}% | ❤️ {c['health']}%" for c in children)
-    text+='\n\nبرای پذیرش فرزند: /adopt نام_کودک'
-    await message.reply(text,reply_markup=main_game_kb())
+        text += '\n'.join(
+            f"👶 {c['name']} | سن: {c['age']} | 😊 {c['happiness']}% | ❤️ {c['health']}%"
+            for c in children
+        )
+    text += '\n\nبرای پذیرش فرزند: /adopt نام_کودک'
+    await message.reply(text, reply_markup=main_game_kb())
+
 
 @router.message(Command('marry'))
 async def marry(message:Message):
-    parts=message.text.split()
-    if len(parts)!=2 or not parts[1].isdigit():
+    await _safe_user(message.from_user.id, message.from_user.full_name)
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
         return await message.reply('💍 استفاده: /marry شناسه_بازیکن')
-    ok,msg=await create_marriage_proposal(message.from_user.id,int(parts[1]))
+    ok, msg = await create_marriage_proposal(message.from_user.id, int(parts[1]))
     if not ok:
-        return await message.reply('❌ '+msg)
-    target=await get_user(int(parts[1]))
-    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='💍 قبول',callback_data=f'marry_accept:{message.from_user.id}'),InlineKeyboardButton(text='❌ رد',callback_data=f'marry_reject:{message.from_user.id}')]])
+        return await message.reply('❌ ' + msg)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text='💍 قبول', callback_data=f'marry_accept:{message.from_user.id}'),
+        InlineKeyboardButton(text='❌ رد', callback_data=f'marry_reject:{message.from_user.id}')
+    ]])
     try:
-        await message.bot.send_message(int(parts[1]), f"💍 {message.from_user.full_name} برای ازدواج با تو پیشنهاد فرستاده است.\n\nبرای تصمیم‌گیری یکی از گزینه‌ها را انتخاب کن.", reply_markup=kb)
+        await message.bot.send_message(
+            int(parts[1]),
+            f"💍 {message.from_user.full_name} برای ازدواج با تو پیشنهاد فرستاده است.\n\n"
+            f"برای تصمیم‌گیری یکی از گزینه‌ها را انتخاب کن.",
+            reply_markup=kb
+        )
         await message.reply('✅ پیشنهاد ازدواج برای بازیکن موردنظر ارسال شد.')
     except Exception:
-        await message.reply('⚠️ پیشنهاد ثبت شد، اما نتوانستم پیام مستقیم برای بازیکن بفرستم. او باید قبلاً ربات را شروع کرده باشد.')
+        await message.reply(
+            '⚠️ پیشنهاد ثبت شد، اما نتوانستم پیام مستقیم برای بازیکن بفرستم. '
+            'او باید قبلاً ربات را شروع کرده باشد.'
+        )
 
 async def _respond_marriage(call:CallbackQuery, accept:bool):
     try:
@@ -188,41 +244,105 @@ async def marry_reject(call:CallbackQuery):
 
 @router.message(Command('adopt'))
 async def adopt(message:Message):
-    parts=message.text.split(maxsplit=1)
-    if len(parts)!=2:
+    await _safe_user(message.from_user.id, message.from_user.full_name)
+    parts = message.text.split(maxsplit=1)
+    if len(parts) != 2:
         return await message.reply('👶 استفاده: /adopt نام_کودک')
-    ok,name=await adopt_child(message.from_user.id,parts[1])
+    ok, name = await adopt_child(message.from_user.id, parts[1])
     if not ok:
-        return await message.reply('❌ '+name)
-    await message.reply(f'👶 سرپرستی {name} با موفقیت ثبت شد.\n\nاز بخش «💍 خانواده» می‌توانی وضعیت کودک را ببینی و از او مراقبت کنی.')
+        return await message.reply('❌ ' + name)
+    await message.reply(
+        f'👶 سرپرستی {name} با موفقیت ثبت شد.\n\n'
+        f'از بخش «💍 خانواده» می‌توانی وضعیت کودک را ببینی و از او مراقبت کنی.'
+    )
+
 
 @router.callback_query(F.data=='world:family')
 async def family_cb(call:CallbackQuery):
-    await family(call.message)
+    # از call.from_user استفاده می‌کنیم تا کاربر درست شناسایی شود
+    u = await _safe_user(call.from_user.id, call.from_user.full_name)
+    if not u:
+        return await call.answer('⚠️ ابتدا /start را بزن.', show_alert=True)
+    marriage = await get_marriage(call.from_user.id)
+    children = await list_children(call.from_user.id) or []
+    text = '💍 <b>خانواده</b>\n\n'
+    if marriage:
+        partner_id = marriage['user2_id'] if marriage['user1_id'] == call.from_user.id else marriage['user1_id']
+        partner = await get_user(partner_id)
+        text += f"💑 همسر: {partner['name'] if partner else partner_id}\n"
+    else:
+        text += '💍 وضعیت: مجرد\n'
+        text += 'برای پیشنهاد ازدواج: /marry شناسه_بازیکن\n'
+    text += f"\n👶 فرزندان تحت سرپرستی: {len(children)}\n"
+    if children:
+        text += '\n'.join(
+            f"👶 {c['name']} | سن: {c['age']} | 😊 {c['happiness']}% | ❤️ {c['health']}%"
+            for c in children
+        )
+    text += '\n\nبرای پذیرش فرزند: /adopt نام_کودک'
+    try:
+        await call.message.edit_text(text, reply_markup=main_game_kb())
+    except Exception:
+        await call.message.answer(text, reply_markup=main_game_kb())
     await call.answer()
+
 
 @router.message(Command('world'))
 @router.message(F.text=='🗺️ جهان')
 async def world(message:Message):
-    await ensure_user(message.from_user.id,message.from_user.full_name); u=await get_user(message.from_user.id); rows=await list_regions()
-    buttons=[]
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت اطلاعات. دوباره /start بزن.')
+    rows = await list_regions() or []
+    buttons = []
     for r in rows:
-        lock=u['level']<r['unlock_level']; buttons.append([InlineKeyboardButton(text=('🔒 ' if lock else '🗺️ ')+r['name']+f' | سطح {r["unlock_level"]}',callback_data=f'region:{r["id"]}')])
-    await message.reply('🗺️ <b>جهان راهنمای ارواح</b>\n\nهر منطقه داستان‌ها و موجودات مخصوص خودش را دارد.',reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        lock = u['level'] < r['unlock_level']
+        buttons.append([InlineKeyboardButton(
+            text=('🔒 ' if lock else '🗺️ ') + r['name'] + f' | سطح {r["unlock_level"]}',
+            callback_data=f'region:{r["id"]}'
+        )])
+    await message.reply(
+        '🗺️ <b>جهان راهنمای ارواح</b>\n\nهر منطقه داستان‌ها و موجودات مخصوص خودش را دارد.',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    )
 
 @router.callback_query(F.data.startswith('region:'))
 async def region(call:CallbackQuery):
-    u=await get_user(call.from_user.id); r=await get_region(int(call.data.split(':')[1]))
-    if not r:return await call.answer('منطقه پیدا نشد.',show_alert=True)
-    if u['level']<r['unlock_level']:return await call.answer(f'این منطقه از سطح {r["unlock_level"]} باز می‌شود.',show_alert=True)
-    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='👻 روح‌های منطقه',callback_data=f'rs:{r["id"]}')],[InlineKeyboardButton(text='😈 موجودات منطقه',callback_data=f'rd:{r["id"]}')],[InlineKeyboardButton(text='🗺️ بازگشت',callback_data='world:regions')]])
-    await call.message.edit_text(f"🗺️ <b>{r['name']}</b>\n\n{r['description']}",reply_markup=kb); await call.answer()
+    u = await _safe_user(call.from_user.id, call.from_user.full_name)
+    if not u:
+        return await call.answer('⚠️ ابتدا /start را بزن.', show_alert=True)
+    try:
+        rid = int(call.data.split(':')[1])
+    except (ValueError, IndexError):
+        return await call.answer('منطقه نامعتبر.', show_alert=True)
+    r = await get_region(rid)
+    if not r:
+        return await call.answer('منطقه پیدا نشد.', show_alert=True)
+    if u['level'] < r['unlock_level']:
+        return await call.answer(f'این منطقه از سطح {r["unlock_level"]} باز می‌شود.', show_alert=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='👻 روح‌های منطقه', callback_data=f'rs:{r["id"]}')],
+        [InlineKeyboardButton(text='😈 موجودات منطقه', callback_data=f'rd:{r["id"]}')],
+        [InlineKeyboardButton(text='🗺️ بازگشت', callback_data='world:regions')]
+    ])
+    await call.message.edit_text(f"🗺️ <b>{r['name']}</b>\n\n{r['description']}", reply_markup=kb)
+    await call.answer()
+
 
 @router.callback_query(F.data=='world:regions')
 async def regions_cb(call:CallbackQuery):
-    rows=await list_regions(); u=await get_user(call.from_user.id)
-    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=('🔒 ' if u['level']<r['unlock_level'] else '🗺️ ')+r['name'],callback_data=f'region:{r["id"]}')] for r in rows])
-    await call.message.edit_text('🗺️ <b>جهان</b>',reply_markup=kb); await call.answer()
+    u = await _safe_user(call.from_user.id, call.from_user.full_name)
+    if not u:
+        return await call.answer('⚠️ ابتدا /start را بزن.', show_alert=True)
+    rows = await list_regions() or []
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=('🔒 ' if u['level'] < r['unlock_level'] else '🗺️ ') + r['name'],
+            callback_data=f'region:{r["id"]}'
+        )] for r in rows
+    ])
+    await call.message.edit_text('🗺️ <b>جهان</b>', reply_markup=kb)
+    await call.answer()
 
 @router.callback_query(F.data.startswith('rs:'))
 async def region_spirits(call:CallbackQuery):
@@ -299,10 +419,14 @@ async def region_demons(call:CallbackQuery):
 @router.message(F.text=='😈 جن‌ها')
 @router.message(F.text=='🛡️ پاک‌سازی')
 async def demons_message(message:Message):
-    rows=await list_demons()
+    await _safe_user(message.from_user.id, message.from_user.full_name)
+    rows = await list_demons() or []
     if not rows:
         return await message.reply('😈 هنوز موجودی در دفتر ثبت نشده است.')
-    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f"demon:{d['id']}")] for d in rows])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}", callback_data=f"demon:{d['id']}")]
+        for d in rows
+    ])
     await message.reply(
         '😈 <b>دفتر موجودات و جن‌ها</b>\n\nیکی را انتخاب کن تا پاک‌سازی شروع شود.',
         reply_markup=kb
@@ -445,8 +569,9 @@ async def dreset(call: CallbackQuery):
 @router.message(Command("balance"))
 @router.message(F.text == "💰 موجودی")
 async def balance_cmd(message: Message):
-    await ensure_user(message.from_user.id, message.from_user.full_name)
-    u = await get_user(message.from_user.id)
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت موجودی. دوباره /start بزن.')
     boost = int(u["coin_boost"] or 0) if "coin_boost" in u.keys() else 0
     bonus = min(boost * 5, 50)
     await message.reply(
@@ -454,15 +579,18 @@ async def balance_cmd(message: Message):
         f"🪙 سکه: {u['coins']}\n"
         f"🔮 کریستال سایه: {u['soul_gems']}\n"
         f"💠 انرژی: {u['energy']}\n"
-        f"✨ نور پسین: {u['light']}\n"
+        f"✨ نور پسین: {u['light'] if 'light' in u.keys() else 0}\n"
         f"💰 ارتقای سکه: سطح {boost}/10 (+{bonus}٪)\n\n"
         f"برای ارتقا از دکمه «💰 ارتقای سکه» استفاده کن."
     )
 
+
 @router.message(Command('daily'))
 @router.message(F.text=='🎁 جایزه روزانه')
 async def daily(message:Message):
-    await ensure_user(message.from_user.id, message.from_user.full_name)
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت اطلاعات. دوباره /start بزن.')
     ok, msg = await daily_claim(message.from_user.id)
     if ok:
         await message.reply(msg)
@@ -472,25 +600,88 @@ async def daily(message:Message):
 @router.message(Command('shop'))
 @router.message(F.text=='🛒 فروشگاه')
 async def shop(message:Message):
-    rows=await list_shop_items(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"{r['name']} | 🪙{r['price_coins']} 💎{r['price_gems']}",callback_data=f'shop:{r["id"]}')] for r in rows]); await message.reply('🛒 <b>فروشگاه</b>',reply_markup=kb)
+    await _safe_user(message.from_user.id, message.from_user.full_name)
+    rows = await list_shop_items() or []
+    if not rows:
+        return await message.reply('🛒 فروشگاه فعلاً خالی است.')
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{r['name']} | 🪙{r['price_coins']} 💎{r['price_gems']}",
+            callback_data=f'shop:{r["id"]}'
+        )] for r in rows
+    ])
+    await message.reply('🛒 <b>فروشگاه محافظان</b>\n\nآیتم موردنظر را انتخاب کن:', reply_markup=kb)
 
 @router.callback_query(F.data.startswith('shop:'))
 async def shop_detail(call:CallbackQuery):
-    item=await get_shop_item(int(call.data.split(':')[1]));
-    if not item:return await call.answer('آیتم پیدا نشد.',show_alert=True)
-    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🛒 خرید',callback_data=f'buy:{item["id"]}')],[InlineKeyboardButton(text='🔙 فروشگاه',callback_data='shopback')]])
-    await call.message.edit_text(f"{item['name']}\n\n{item['description']}\n\n🪙 {item['price_coins']} | 💎 {item['price_gems']}",reply_markup=kb); await call.answer()
+    try:
+        item_id = int(call.data.split(':')[1])
+    except (ValueError, IndexError):
+        return await call.answer('آیتم نامعتبر است.', show_alert=True)
+    item = await get_shop_item(item_id)
+    if not item:
+        return await call.answer('آیتم پیدا نشد.', show_alert=True)
+    effects = []
+    if item['energy_gain']:
+        effects.append(f"💠 +{item['energy_gain']} انرژی (با استفاده)")
+    if item['mission_bonus']:
+        effects.append(f"🔮 +{item['mission_bonus']} قدرت روح (با استفاده)")
+    effect_line = "\n".join(effects) if effects else "اثر ویژه هنگام استفاده"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='🛒 خرید', callback_data=f'buy:{item["id"]}')],
+        [InlineKeyboardButton(text='🔙 فروشگاه', callback_data='shopback')]
+    ])
+    await call.message.edit_text(
+        f"<b>{item['name']}</b>\n\n"
+        f"{item['description']}\n\n"
+        f"🪙 قیمت سکه: {item['price_coins']}\n"
+        f"💎 قیمت کریستال: {item['price_gems']}\n"
+        f"📦 تعداد در هر خرید: {item['quantity'] or 1}\n\n"
+        f"{effect_line}",
+        reply_markup=kb
+    )
+    await call.answer()
 
 @router.callback_query(F.data.startswith('buy:'))
 async def buy(call:CallbackQuery):
     await ensure_user(call.from_user.id, call.from_user.full_name)
-    ok,res=await buy_shop_item(call.from_user.id,int(call.data.split(':')[1]))
-    await call.answer('خرید انجام شد 🛒' if ok else ('آیتم پیدا نشد.' if res == 'item_not_found' else 'سکه/کریستال کافی نیست.'), show_alert=not ok)
-    if ok: await call.message.reply(f"✅ {res['name']} به کوله‌پشتی اضافه شد.")
+    try:
+        item_id = int(call.data.split(':')[1])
+    except (ValueError, IndexError):
+        return await call.answer('آیتم نامعتبر است.', show_alert=True)
+    ok, res = await buy_shop_item(call.from_user.id, item_id)
+    if ok:
+        await call.answer('خرید انجام شد 🛒', show_alert=False)
+        await call.message.edit_text(
+            f"✅ <b>{res['name']}</b> به کوله‌پشتی اضافه شد.\n\n"
+            f"از بخش 🎒 کوله‌پشتی می‌توانی آن را استفاده کنی.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text='🎒 کوله‌پشتی', callback_data='world:inventory')],
+                [InlineKeyboardButton(text='🔙 فروشگاه', callback_data='shopback')]
+            ])
+        )
+    else:
+        msg = {
+            'item_not_found': 'آیتم پیدا نشد.',
+            'user_not_found': 'کاربر پیدا نشد.',
+            'not_enough': 'سکه یا کریستال کافی نیست.',
+        }.get(res, 'خرید ناموفق بود.')
+        await call.answer(msg, show_alert=True)
 
 @router.callback_query(F.data=='shopback')
 async def shopback(call:CallbackQuery):
-    await shop(call.message); await call.answer()
+    rows = await list_shop_items()
+    if not rows:
+        await call.message.edit_text('🛒 فروشگاه فعلاً خالی است.')
+        return await call.answer()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{r['name']} | 🪙{r['price_coins']} 💎{r['price_gems']}",
+            callback_data=f'shop:{r["id"]}'
+        )] for r in rows
+    ])
+    await call.message.edit_text('🛒 <b>فروشگاه محافظان</b>\n\nآیتم موردنظر را انتخاب کن:', reply_markup=kb)
+    await call.answer()
 
 def inventory_markup(rows):
     buttons = []
@@ -510,17 +701,24 @@ async def render_inventory_message(message: Message, edit=False):
 @router.message(Command('inventory'))
 @router.message(F.text=='🎒 کوله‌پشتی')
 async def inventory(message:Message):
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ خطا در دریافت اطلاعات. دوباره /start بزن.')
     await render_inventory_message(message)
+
 
 @router.callback_query(F.data=='world:inventory')
 async def inventory_cb(call:CallbackQuery):
-    # callback.message belongs to the bot, so use callback.from_user for the owner.
-    rows = await get_inventory(call.from_user.id)
+    await _safe_user(call.from_user.id, call.from_user.full_name)
+    rows = await get_inventory(call.from_user.id) or []
     text = '🎒 <b>کوله‌پشتی</b>\n\n' + (
         ''.join(f"{r['name']} × {r['quantity']}\n📝 {r['description']}\n\n" for r in rows)
         if rows else 'خالی است.'
     )
-    await call.message.edit_text(text, reply_markup=inventory_markup(rows))
+    try:
+        await call.message.edit_text(text, reply_markup=inventory_markup(rows))
+    except Exception:
+        await call.message.answer(text, reply_markup=inventory_markup(rows))
     await call.answer()
 
 @router.callback_query(F.data.startswith('useitem:'))
@@ -543,4 +741,12 @@ async def use_item(call:CallbackQuery):
 @router.message(Command('rank'))
 @router.message(F.text=='🏆 رتبه‌بندی')
 async def rank(message:Message):
-    rows=await top_users(); await message.reply('🏆 <b>تالار راهنمایان</b>\n\n'+''.join(f"{i}. {r['name']} — سطح {r['level']} | 👻 {r['spirits_sent']} | 😈 {r['cleanses']}\n" for i,r in enumerate(rows,1)))
+    await _safe_user(message.from_user.id, message.from_user.full_name)
+    rows = await top_users() or []
+    if not rows:
+        return await message.reply('🏆 هنوز کسی در رتبه‌بندی نیست.')
+    text = '🏆 <b>تالار راهنمایان</b>\n\n' + ''.join(
+        f"{i}. {r['name']} — سطح {r['level']} | 👻 {r['spirits_sent']} | 😈 {r['cleanses']}\n"
+        for i, r in enumerate(rows, 1)
+    )
+    await message.reply(text)

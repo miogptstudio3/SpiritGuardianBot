@@ -4,14 +4,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-CREATOR_ID = 6227792513
-ADMIN_IDS = {
+
+# لیست مرتب ادمین‌ها (ترتیب در .env حفظ می‌شود)
+_admin_list = [
     int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",")
     if x.strip().isdigit()
-}
+]
+ADMIN_IDS = set(_admin_list)
+
+# سازنده اصلی: از CREATOR_ID در env، یا اولین شناسه در ADMIN_IDS
+_creator_env = os.getenv("CREATOR_ID", "").strip()
+CREATOR_ID = int(_creator_env) if _creator_env.isdigit() else (_admin_list[0] if _admin_list else 0)
 
 # سطح بالاتر = قدرت بیشتر. ویژه بالاترین رتبه است.
-# اولین شناسه موجود در ADMIN_IDS به صورت پیش‌فرض «سازنده» شناخته می‌شود.
+# اولین شناسه موجود در ADMIN_IDS به صورت پیش‌فرض «سازنده» / ویژه شناخته می‌شود.
 ROLE_LEVELS = {
     "ویژه": 100,
     "مدیر": 80,

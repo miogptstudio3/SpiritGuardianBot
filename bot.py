@@ -39,13 +39,18 @@ def register_handlers(dp: Dispatcher):
 class BanMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         user = getattr(event, "from_user", None)
-        if user and await is_banned(user.id):
+        if user:
             try:
-                if hasattr(event, "answer"):
-                    await event.answer("🚫 دسترسی شما به ربات مسدود شده است.")
+                banned = await is_banned(user.id)
             except Exception:
-                pass
-            return
+                banned = False
+            if banned:
+                try:
+                    if hasattr(event, "answer") and callable(event.answer):
+                        await event.answer("🚫 دسترسی شما به ربات مسدود شده است.")
+                except Exception:
+                    pass
+                return
         return await handler(event, data)
 
 

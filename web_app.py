@@ -8,18 +8,17 @@ import hashlib
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 
+from dotenv import load_dotenv
 from aiohttp import web
 import aiosqlite
+
+load_dotenv()
 
 DB_PATH = os.getenv("DATABASE_URL", "").strip()
 if not DB_PATH:
     raise RuntimeError("DATABASE_URL در فایل .env تنظیم نشده است.")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-_db_dir = os.path.dirname(DB_PATH)
-if _db_dir:
-    os.makedirs(_db_dir, exist_ok=True)
 
 
 # ─── Auth ───────────────────────────────────────────────────────────
@@ -162,14 +161,16 @@ async def use_item(request):
             (u["user_id"], item_id),
         )
         await db.execute(
-            """UPDATE users SET energy=LEAST(100, energy+?),
+            "DELETE FROM inventory WHERE user_id=? AND item_id=? AND quantity<=0",
+            (u["user_id"], item_id),
+        )
+        energy_g = item["energy_gain"] or 0
+        bonus = item["mission_bonus"] or 0
+        xp_gain = max(1, bonus // 2) if bonus else 5
+        await db.execute(
+            """UPDATE users SET energy=energy+?,
                spirit_power=spirit_power+?, xp=xp+? WHERE user_id=?""",
-            (
-                item["energy_gain"],
-                item["mission_bonus"],
-                max(1, item["mission_bonus"] // 2),
-                u["user_id"],
-            ),
+            (energy_g, bonus, xp_gain, u["user_id"]),
         )
         await db.commit()
     return web.json_response({"ok": True, "message": f"{item['name']} استفاده شد."})
@@ -204,7 +205,7 @@ async def buy(request):
         )
         await db.execute(
             """INSERT INTO inventory(user_id,item_id,quantity) VALUES(?,?,?)
-               ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""",
+               ON CONFLICT(user_id,item_id) DO UPDATE SET quantity = inventory.quantity + EXCLUDED.quantity""",
             (u["user_id"], item_id, item["quantity"] or 1),
         )
         await db.commit()

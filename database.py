@@ -2,6 +2,9 @@ import aiosqlite
 import os
 from datetime import datetime, timezone
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # PostgreSQL connection string is provided through DATABASE_URL.
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = DATABASE_URL  # kept for compatibility with game.py/web_app.py
@@ -551,21 +554,30 @@ async def remove_staff(user_id: int):
         await db.commit()
 
 async def is_banned(user_id: int):
-    from datetime import datetime, timezone
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT banned, ban_until FROM moderation WHERE user_id=?", (user_id,))
-        row = await cur.fetchone()
-        if not row or not row[0]:
-            return False
-        if row[1]:
-            try:
-                if datetime.fromisoformat(row[1]) <= datetime.now(timezone.utc):
-                    await db.execute("UPDATE moderation SET banned=0, ban_until=NULL WHERE user_id=?", (user_id,))
-                    await db.commit()
-                    return False
-            except ValueError:
-                pass
-        return True
+    """اگر کاربر مسدود باشد True برمی‌گرداند. در صورت خطای دیتابیس False (اجازه عبور)."""
+    try:
+        from datetime import datetime, timezone
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute(
+                "SELECT banned, ban_until FROM moderation WHERE user_id=?", (user_id,)
+            )
+            row = await cur.fetchone()
+            if not row or not row[0]:
+                return False
+            if row[1]:
+                try:
+                    if datetime.fromisoformat(str(row[1])) <= datetime.now(timezone.utc):
+                        await db.execute(
+                            "UPDATE moderation SET banned=0, ban_until=NULL WHERE user_id=?",
+                            (user_id,),
+                        )
+                        await db.commit()
+                        return False
+                except (ValueError, TypeError):
+                    pass
+            return True
+    except Exception:
+        return False
 
 async def set_ban(user_id: int, banned: bool):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -653,16 +665,18 @@ async def buy_shop_item(user_id: int, item_id: int):
         if user["coins"] < item["price_coins"] or user["soul_gems"] < item["price_gems"]:
             return False, "not_enough"
 
+        # فقط کسر هزینه و اضافه کردن به کوله‌پشتی — اثر آیتم هنگام استفاده اعمال می‌شود
         await db.execute(
-            "UPDATE users SET coins=coins-?, soul_gems=soul_gems-?, energy=energy+? WHERE user_id=?",
-            (item["price_coins"], item["price_gems"], item["energy_gain"], user_id)
+            "UPDATE users SET coins=coins-?, soul_gems=soul_gems-? WHERE user_id=?",
+            (item["price_coins"], item["price_gems"], user_id)
         )
+        qty = item["quantity"] if item["quantity"] else 1
         await db.execute(
             """INSERT INTO inventory(user_id, item_id, quantity)
                VALUES (?, ?, ?)
                ON CONFLICT(user_id, item_id)
-               DO UPDATE SET quantity=quantity+excluded.quantity""",
-            (user_id, item_id, item["quantity"])
+               DO UPDATE SET quantity = inventory.quantity + EXCLUDED.quantity""",
+            (user_id, item_id, qty)
         )
         await db.commit()
         return True, item
@@ -695,8 +709,8 @@ async def use_inventory_item(user_id: int, item_id: int):
                 return False, "فعلاً آیتم جایزه‌ای وجود ندارد."
             await db.execute(
                 """INSERT INTO inventory(user_id,item_id,quantity) VALUES (?,?,?)
-                   ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""",
-                (user_id, reward["id"], reward["quantity"])
+                   ON CONFLICT(user_id,item_id) DO UPDATE SET quantity = inventory.quantity + EXCLUDED.quantity""",
+                (user_id, reward["id"], reward["quantity"] or 1)
             )
             effect_text = f"🎁 جایزه تصادفی: {reward['name']} × {reward['quantity']}"
         else:
