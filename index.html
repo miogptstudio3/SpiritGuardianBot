@@ -43,6 +43,7 @@
       <button data-tab="stories">👻 ارواح</button>
       <button data-tab="shop">🛒 فروشگاه</button>
       <button data-tab="inventory">🎒 کیف</button>
+      <button data-tab="social">💬 اجتماعی</button>
       <button data-tab="rank">🏆 رتبه</button>
       <button data-tab="upgrade">💰 ارتقا</button>
     </nav>
@@ -72,6 +73,8 @@
           <span>👻 ارواح <b id="spiritsSent">—</b></span>
           <span>😈 پاک‌سازی <b id="cleanses">—</b></span>
           <span>❤️ سلامتی <b id="health">—</b></span>
+          <span>🍗 گرسنگی <b id="hunger">—</b></span>
+          <span>💧 تشنگی <b id="thirst">—</b></span>
           <span>💰 بونوس سکه <b id="coinBonus">—</b></span>
         </div>
       </article>
@@ -118,6 +121,30 @@
         <button class="ghost" id="invRefresh">↻</button>
       </div>
       <div id="inventoryList" class="list"></div>
+    </section>
+
+    <!-- SOCIAL -->
+    <section id="social" class="tab">
+      <article class="card">
+        <h2>💍 ازدواج با آیدی</h2>
+        <p>آیدی عددی تلگرام طرف مقابل را وارد کن.</p>
+        <div class="row-input">
+          <input id="marryId" type="number" placeholder="مثال: 123456789" />
+          <button id="marryBtn" class="primary">ارسال پیشنهاد</button>
+        </div>
+      </article>
+      <article class="card">
+        <h2>💬 چت با بازیکن</h2>
+        <div class="row-input">
+          <input id="chatTo" type="number" placeholder="آیدی گیرنده" />
+        </div>
+        <div class="row-input">
+          <input id="chatText" type="text" placeholder="متن پیام…" maxlength="500" />
+          <button id="chatSend" class="primary">ارسال</button>
+        </div>
+        <button class="ghost" id="chatRefresh">↻ بارگذاری گفتگو</button>
+        <div id="chatList" class="list"></div>
+      </article>
     </section>
 
     <!-- RANK -->

@@ -9,7 +9,14 @@ from database import (
     list_demons, get_demon, get_or_create_encounter, update_encounter, reset_encounter,
     add_progress, spend_energy, upgrade_coin_boost, create_marriage_proposal,
     get_pending_proposal, respond_marriage, get_marriage, list_children,
-    adopt_child, care_for_child, train_mind, get_training_stats, DB_PATH
+    adopt_child, care_for_child, train_mind, get_training_stats, DB_PATH,
+    get_daily_missions, claim_mission_reward, top_season,
+    require_alive, apply_damage, heal_user, revive_with_gems,
+    check_mission_limit, bump_mission_limit, is_dead,
+    apply_activity_needs, tick_needs,
+    ENERGY_CLUE, ENERGY_SEAL, ENERGY_CLEAN, ENERGY_RESET,
+    DAMAGE_WRONG_CLUE, DAMAGE_DEMON_HIT_MIN, DAMAGE_DEMON_HIT_MAX,
+    DAILY_SPIRIT_LIMIT, DAILY_CLEANSE_LIMIT,
 )
 import aiosqlite
 
@@ -20,6 +27,7 @@ def main_game_kb():
         [InlineKeyboardButton(text='👻 دفتر ارواح',callback_data='world:spirits'),InlineKeyboardButton(text='😈 جن‌ها',callback_data='world:demons')],
         [InlineKeyboardButton(text='🗺️ جهان',callback_data='world:regions'),InlineKeyboardButton(text='🎒 کوله‌پشتی',callback_data='world:inventory')],
         [InlineKeyboardButton(text='💍 خانواده',callback_data='world:family'),InlineKeyboardButton(text='🧠 پرورش ذهن',callback_data='training:mind')],
+        [InlineKeyboardButton(text='📜 مأموریت کریستال',callback_data='missions:list')],
     ])
 
 
@@ -98,24 +106,35 @@ async def profile(message: Message):
         return await message.reply('⚠️ خطا در دریافت پروفایل. دوباره /start بزن.')
     boost = int(u['coin_boost'] or 0) if 'coin_boost' in u.keys() else 0
     bonus = min(boost * 5, 50)
+    deaths = u['deaths'] if 'deaths' in u.keys() else 0
+    dead = await is_dead(message.from_user.id)
+    status = '💀 مرگ روحی' if dead else '✅ زنده'
     await message.reply(
         f'''👤 <b>پروفایل راهنمای ارواح</b>
 
 نام: {u['name']}
+وضعیت: {status}
 ⭐ سطح راهنمایی: {u['level']}
 ✨ تجربه: {u['xp']}
 ❤️ سلامتی: {u['health']}/{u['max_health']}
 💠 انرژی روحی: {u['energy']}
 🪙 سکه: {u['coins']}
 🔮 کریستال سایه: {u['soul_gems']}
-✨ نور پسین: {u.get('light') or 0}
+✨ نور پسین: {u['light'] if 'light' in u.keys() else 0}
+🍗 گرسنگی: {u['hunger'] if 'hunger' in u.keys() else 100}/100
+💧 تشنگی: {u['thirst'] if 'thirst' in u.keys() else 100}/100
 💰 ارتقای سکه: سطح {boost}/10 (+{bonus}٪ پاداش)
 👻 ارواح راهی‌شده: {u['spirits_sent']}
 😈 پاک‌سازی‌ها: {u['cleanses']}
+💀 مرگ‌ها: {deaths}
 🧠 قدرت ذهن: {u['mind_power']}
 💪 قدرت جسم: {u['body_power']}
 🔮 قدرت روح: {u['spirit_power']}
-🏅 امتیاز تمرین: {u['training_points']}''',
+🏅 امتیاز تمرین: {u['training_points']}
+
+⛔ سهمیه روزانه: حداکثر {DAILY_SPIRIT_LIMIT} روح و {DAILY_CLEANSE_LIMIT} پاک‌سازی
+🍗💧 اگر گرسنه/تشنه شوی مأموریت سخت می‌شود — از فروشگاه بخر
+در صورت مرگ: /revive یا آیتم شفا از فروشگاه''',
         reply_markup=main_game_kb()
     )
 
@@ -287,6 +306,13 @@ async def family_cb(call:CallbackQuery):
     await call.answer()
 
 
+async def _safe_edit(call, text, reply_markup=None):
+    try:
+        await call.message.edit_text(text, reply_markup=reply_markup)
+    except Exception:
+        await call.message.answer(text, reply_markup=reply_markup)
+
+
 @router.message(Command('world'))
 @router.message(F.text=='🗺️ جهان')
 async def world(message:Message):
@@ -294,17 +320,28 @@ async def world(message:Message):
     if not u:
         return await message.reply('⚠️ خطا در دریافت اطلاعات. دوباره /start بزن.')
     rows = await list_regions() or []
+    if not rows:
+        return await message.reply(
+            '🗺️ هنوز منطقه‌ای در جهان ثبت نشده.\n'
+            'یک‌بار ربات را ری‌استارت کن تا داده‌های اولیه ساخته شوند.'
+        )
+    level = int(u['level'] or 1)
     buttons = []
     for r in rows:
-        lock = u['level'] < r['unlock_level']
+        unlock = int(r['unlock_level'] or 1)
+        lock = level < unlock
         buttons.append([InlineKeyboardButton(
-            text=('🔒 ' if lock else '🗺️ ') + r['name'] + f' | سطح {r["unlock_level"]}',
+            text=('🔒 ' if lock else '🗺️ ') + str(r['name']) + f' | سطح {unlock}',
             callback_data=f'region:{r["id"]}'
         )])
     await message.reply(
-        '🗺️ <b>جهان راهنمای ارواح</b>\n\nهر منطقه داستان‌ها و موجودات مخصوص خودش را دارد.',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+        '🗺️ <b>جهان راهنمای ارواح</b>\n\n'
+        f'سطح تو: <b>{level}</b>\n'
+        'هر منطقه داستان‌ها و موجودات مخصوص خودش را دارد.\n'
+        'مناطق قفل‌شده با 🔒 مشخص‌اند.',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
+
 
 @router.callback_query(F.data.startswith('region:'))
 async def region(call:CallbackQuery):
@@ -317,15 +354,17 @@ async def region(call:CallbackQuery):
         return await call.answer('منطقه نامعتبر.', show_alert=True)
     r = await get_region(rid)
     if not r:
-        return await call.answer('منطقه پیدا نشد.', show_alert=True)
-    if u['level'] < r['unlock_level']:
-        return await call.answer(f'این منطقه از سطح {r["unlock_level"]} باز می‌شود.', show_alert=True)
+        return await call.answer('منطقه پیدا نشد. ربات را ری‌استارت کن.', show_alert=True)
+    level = int(u['level'] or 1)
+    unlock = int(r['unlock_level'] or 1)
+    if level < unlock:
+        return await call.answer(f'این منطقه از سطح {unlock} باز می‌شود.', show_alert=True)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='👻 روح‌های منطقه', callback_data=f'rs:{r["id"]}')],
         [InlineKeyboardButton(text='😈 موجودات منطقه', callback_data=f'rd:{r["id"]}')],
         [InlineKeyboardButton(text='🗺️ بازگشت', callback_data='world:regions')]
     ])
-    await call.message.edit_text(f"🗺️ <b>{r['name']}</b>\n\n{r['description']}", reply_markup=kb)
+    await _safe_edit(call, f"🗺️ <b>{r['name']}</b>\n\n{r['description']}", kb)
     await call.answer()
 
 
@@ -335,24 +374,40 @@ async def regions_cb(call:CallbackQuery):
     if not u:
         return await call.answer('⚠️ ابتدا /start را بزن.', show_alert=True)
     rows = await list_regions() or []
+    level = int(u['level'] or 1)
+    if not rows:
+        await _safe_edit(call, '🗺️ هنوز منطقه‌ای ثبت نشده. ربات را ری‌استارت کن.')
+        return await call.answer()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=('🔒 ' if u['level'] < r['unlock_level'] else '🗺️ ') + r['name'],
+            text=('🔒 ' if level < int(r['unlock_level'] or 1) else '🗺️ ') + str(r['name']),
             callback_data=f'region:{r["id"]}'
         )] for r in rows
     ])
-    await call.message.edit_text('🗺️ <b>جهان</b>', reply_markup=kb)
+    await _safe_edit(call, f'🗺️ <b>جهان</b>\nسطح تو: {level}', kb)
     await call.answer()
+
 
 @router.callback_query(F.data.startswith('rs:'))
 async def region_spirits(call:CallbackQuery):
-    rid=int(call.data.split(':')[1]); rows=await list_story_spirits(rid)
-    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"👻 {s['name']} | {'★'*s['difficulty']}",callback_data=f'story:{s["id"]}')] for s in rows]+[[InlineKeyboardButton(text='🔙 منطقه',callback_data=f'region:{rid}')]])
-    await call.message.edit_text('👻 <b>دفتر ارواح منطقه</b>',reply_markup=kb); await call.answer()
+    try:
+        rid = int(call.data.split(':')[1])
+    except (ValueError, IndexError):
+        return await call.answer('منطقه نامعتبر.', show_alert=True)
+    rows = await list_story_spirits(rid) or []
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"👻 {s['name']} | {'★' * int(s['difficulty'] or 1)}",
+            callback_data=f'story:{s["id"]}'
+        )] for s in rows
+    ]
+    buttons.append([InlineKeyboardButton(text='🔙 منطقه', callback_data=f'region:{rid}')])
+    text = '👻 <b>دفتر ارواح منطقه</b>' if rows else '👻 در این منطقه هنوز پرونده‌ای نیست.'
+    await _safe_edit(call, text, InlineKeyboardMarkup(inline_keyboard=buttons))
+    await call.answer()
 
 @router.message(Command('spirits'))
 @router.message(F.text=='👻 ارواح')
-@router.message(F.text=='📜 مأموریت‌ها')
 async def spirits(message:Message):
     await world(message)
 
@@ -361,49 +416,151 @@ async def story(call:CallbackQuery):
     sid=int(call.data.split(':')[1]); s=await get_story_spirit(sid); p=await get_next_clue(call.from_user.id,sid)
     if not s:return await call.answer('پرونده پیدا نشد.',show_alert=True)
     kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔎 شروع پرونده',callback_data=f'clue:{sid}')],[InlineKeyboardButton(text='🔙 دفتر ارواح',callback_data=f'rs:{s["region_id"]}')]])
-    await call.message.edit_text(f"👻 <b>{s['name']}</b>\n\nنوع: {s['type']}\nسن: {s['age']}\nدرجه: {'★'*s['difficulty']}\nمنطقه: {s['region_name']}\n\n📜 {s['story']}\n\n❤️ وضعیت: {s['status']}\n🎯 آخرین خواسته: {s['request']}\n\n✨ پاداش: {s['reward_coins']} سکه + {s['reward_xp']} XP",reply_markup=kb); await call.answer()
+    await call.message.edit_text(
+        f"👻 <b>{s['name']}</b>\n\n"
+        f"نوع: {s['type']}\nسن: {s['age']}\nدرجه: {'★'*s['difficulty']}\n"
+        f"منطقه: {s['region_name']}\n\n"
+        f"📜 {s['story']}\n\n"
+        f"❤️ وضعیت: {s['status']}\n🎯 آخرین خواسته: {s['request']}\n\n"
+        f"✨ پاداش پایه: {s['reward_coins']} سکه + {s['reward_xp']} XP\n"
+        f"🌟 بدون اشتباه = پایان کامل و پاداش بیشتر",
+        reply_markup=kb,
+    )
+    await call.answer()
 
 @router.callback_query(F.data.startswith('clue:'))
 async def clue(call:CallbackQuery):
-    sid=int(call.data.split(':')[1]); s=await get_story_spirit(sid); c=await get_next_clue(call.from_user.id,sid)
+    ok_alive, msg = await require_alive(call.from_user.id)
+    if not ok_alive:
+        return await call.answer(msg, show_alert=True)
+    sid = int(call.data.split(':')[1])
+    s = await get_story_spirit(sid)
+    c = await get_next_clue(call.from_user.id, sid)
     if not c:
-        await complete_spirit(call,sid,s); return
-    # Three choices, one correct; wrong choices keep story open but cost energy.
-    choices=[c['correct_option']]+['🚶 ترک منطقه','💬 سؤال اشتباه']
+        await complete_spirit(call, sid, s)
+        return
+    choices = [c['correct_option']] + ['🚶 ترک منطقه', '💬 سؤال اشتباه', '🌫️ دنبال مه رفتن']
     random.shuffle(choices)
-    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=x,callback_data=f'choice:{sid}:{x}')] for x in choices])
-    await call.message.edit_text(f"🧩 <b>سرنخ {c['clue_order']}</b>\n\n{c['text']}\n\nچه می‌کنی؟",reply_markup=kb); await call.answer()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=x, callback_data=f'choice:{sid}:{x}')] for x in choices
+    ])
+    await call.message.edit_text(
+        f"🧩 <b>سرنخ {c['clue_order']}</b>\n\n{c['text']}\n\n"
+        f"⚠️ هزینه هر انتخاب: {ENERGY_CLUE} انرژی — انتخاب اشتباه آسیب می‌زند!",
+        reply_markup=kb,
+    )
+    await call.answer()
+
 
 @router.callback_query(F.data.startswith('choice:'))
 async def choice(call:CallbackQuery):
-    _,sid,opt=call.data.split(':',2); sid=int(sid); s=await get_story_spirit(sid); c=await get_next_clue(call.from_user.id,sid); u=await get_user(call.from_user.id)
-    if not await spend_energy(call.from_user.id, 1):
-        return await call.answer('💠 انرژی روحی کافی نداری.', show_alert=True)
+    ok_alive, msg = await require_alive(call.from_user.id)
+    if not ok_alive:
+        return await call.answer(msg, show_alert=True)
+    parts = call.data.split(':', 2)
+    if len(parts) < 3:
+        return await call.answer('انتخاب نامعتبر.', show_alert=True)
+    sid = int(parts[1])
+    opt = parts[2]
+    s = await get_story_spirit(sid)
+    c = await get_next_clue(call.from_user.id, sid)
+    if not c:
+        return await complete_spirit(call, sid, s)
+    if not await spend_energy(call.from_user.id, ENERGY_CLUE):
+        return await call.answer(
+            f'💠 حداقل {ENERGY_CLUE} انرژی لازم است.', show_alert=True
+        )
+    ok_need, need_msg = await apply_activity_needs(call.from_user.id, 4, 3)
+    if not ok_need:
+        return await call.answer(need_msg, show_alert=True)
     correct = opt == c['correct_option']
     ok, idx, done = await advance_spirit(call.from_user.id, sid, correct)
     if not correct:
-        await call.message.edit_text('🌫️ انتخابت سرنخ را کامل نکرد.\n\nمی‌توانی دوباره بررسی کنی.',reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔎 ادامه بررسی',callback_data=f'clue:{sid}')]])); return await call.answer('سرنخ اشتباه بود.')
-    if done:return await complete_spirit(call,sid,s)
-    await call.message.edit_text(f'✨ سرنخ پیدا شد!\n\nپیشرفت پرونده: {idx}/{await clue_count(sid)}',reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔎 سرنخ بعدی',callback_data=f'clue:{sid}')]])); await call.answer('درست بود!')
+        alive, hp, died, dmg_msg = await apply_damage(call.from_user.id, DAMAGE_WRONG_CLUE)
+        text = (
+            f'🌫️ انتخابت اشتباه بود!\n\n{dmg_msg}\n\n'
+            f'می‌توانی دوباره تلاش کنی — اگر هنوز زنده‌ای.'
+        )
+        if died:
+            await call.message.edit_text(dmg_msg)
+            return await call.answer('مرگ روحی!', show_alert=True)
+        await call.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text='🔎 ادامه بررسی', callback_data=f'clue:{sid}')]
+            ]),
+        )
+        return await call.answer('سرنخ اشتباه بود.')
+    if done:
+        return await complete_spirit(call, sid, s)
+    await call.message.edit_text(
+        f'✨ سرنخ پیدا شد!\n\nپیشرفت پرونده: {idx}/{await clue_count(sid)}',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='🔎 سرنخ بعدی', callback_data=f'clue:{sid}')]
+        ]),
+    )
+    await call.answer('درست بود!')
+
 
 async def clue_count(sid):
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute('SELECT COUNT(*) FROM spirit_clues WHERE spirit_id=?', (sid,))
         return (await cur.fetchone())[0]
 
+
 async def complete_spirit(call, sid, s):
-    final_coins = await add_progress(call.from_user.id, s['reward_coins'], s['reward_xp'], spirit=True)
+    ok_lim, lim_msg = await check_mission_limit(call.from_user.id, "spirit")
+    if not ok_lim:
+        await call.message.edit_text(
+            f"⛔ پرونده حل شد اما {lim_msg}\n"
+            f"پاداش این روح ذخیره نشد. فردا دوباره تلاش کن."
+        )
+        return await call.answer(lim_msg, show_alert=True)
+    # تعداد اشتباهات → نوع پایان
+    from database import get_spirit_progress
+    progress = await get_spirit_progress(call.from_user.id, sid)
+    mistakes = int(progress[2]) if progress and len(progress) > 2 else 0
+    if mistakes == 0:
+        ending = (
+            "🌟 <b>پایان کامل</b>\n"
+            f"بدون حتی یک اشتباه، حقیقت {s['name']} را یافتی. "
+            "روح با آرامشی نادر از مرز گذشت و نام تو را در نور پسین زمزمه کرد."
+        )
+        gem_bonus, coin_mul = 2, 1.25
+    elif mistakes <= 2:
+        ending = (
+            "✨ <b>پایان آرام</b>\n"
+            f"{s['name']} پس از کمی تردید، حقیقت را پذیرفت و راهی دنیای پسین شد."
+        )
+        gem_bonus, coin_mul = 1, 1.0
+    else:
+        ending = (
+            "🌫️ <b>پایان تلخ</b>\n"
+            f"حقیقت دیر کشف شد. {s['name']} عبور کرد، اما سایه‌ای از پشیمانی با او ماند. "
+            "دفعه بعد با دقت بیشتر پیش برو."
+        )
+        gem_bonus, coin_mul = 0, 0.85
+
+    gems = max(1, int(s['difficulty']) // 2) + gem_bonus
+    coins = max(20, int(int(s['reward_coins']) // 2 * coin_mul))
+    xp = max(15, int(s['reward_xp']) // 2)
+    final_coins, got_gems = await add_progress(
+        call.from_user.id, coins, xp, spirit=True, gems=gems
+    )
+    await bump_mission_limit(call.from_user.id, "spirit")
+    light = max(1, int(s['difficulty']))
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             'UPDATE users SET light=light+? WHERE user_id=?',
-            (max(1, s['difficulty'] * 2), call.from_user.id)
+            (light, call.from_user.id),
         )
         await db.commit()
     await call.message.edit_text(
-        f"✨ <b>روح آرام گرفت</b>\n\n"
-        f"👻 {s['name']} حقیقت را یافت و از مرز میان دو دنیا عبور کرد.\n\n"
-        f"🪙 +{final_coins} سکه\n✨ +{s['reward_xp']} XP\n"
-        f"✨ +{max(1, s['difficulty'] * 2)} نور پسین"
+        f"{ending}\n\n"
+        f"👻 پرونده: <b>{s['name']}</b>\n"
+        f"❌ اشتباهات در مسیر: {mistakes}\n\n"
+        f"🪙 +{final_coins} سکه\n✨ +{xp} XP\n"
+        f"🔮 +{got_gems} کریستال\n✨ +{light} نور پسین"
     )
     await call.answer('روح راهی شد ✨')
 
@@ -413,8 +570,21 @@ async def world_spirits(call:CallbackQuery):
 
 @router.callback_query(F.data.startswith('rd:'))
 async def region_demons(call:CallbackQuery):
-    rid=int(call.data.split(':')[1]); rows=await list_demons(rid); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f'demon:{d["id"]}')] for d in rows]+[[InlineKeyboardButton(text='🔙 منطقه',callback_data=f'region:{rid}')]])
-    await call.message.edit_text('😈 <b>موجودات منطقه</b>',reply_markup=kb); await call.answer()
+    try:
+        rid = int(call.data.split(':')[1])
+    except (ValueError, IndexError):
+        return await call.answer('منطقه نامعتبر.', show_alert=True)
+    rows = await list_demons(rid) or []
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"😈 {d['name']} | {'★' * int(d['rank'] or 1)}",
+            callback_data=f'demon:{d["id"]}'
+        )] for d in rows
+    ]
+    buttons.append([InlineKeyboardButton(text='🔙 منطقه', callback_data=f'region:{rid}')])
+    text = '😈 <b>موجودات منطقه</b>' if rows else '😈 در این منطقه موجودی نیست.'
+    await _safe_edit(call, text, InlineKeyboardMarkup(inline_keyboard=buttons))
+    await call.answer()
 
 @router.message(F.text=='😈 جن‌ها')
 @router.message(F.text=='🛡️ پاک‌سازی')
@@ -480,6 +650,9 @@ async def dcheck(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith('dseal:'))
 async def dseal(call: CallbackQuery):
+    ok_alive, msg = await require_alive(call.from_user.id)
+    if not ok_alive:
+        return await call.answer(msg, show_alert=True)
     did = int(call.data.split(':')[1])
     d = await get_demon(did)
     e = await get_or_create_encounter(call.from_user.id, did)
@@ -487,21 +660,31 @@ async def dseal(call: CallbackQuery):
         return await call.answer('موجود پیدا نشد.', show_alert=True)
     if e['status'] == 'completed':
         return await call.answer('این موجود قبلاً پاک‌سازی شده. از «مبارزه دوباره» استفاده کن.', show_alert=True)
-    if not await spend_energy(call.from_user.id, 2):
-        return await call.answer('💠 انرژی کافی نداری.', show_alert=True)
-    corr = max(0, e['corruption'] - random.randint(12, 24))
-    hp = max(0, e['health'] - random.randint(10, 35))
+    if not await spend_energy(call.from_user.id, ENERGY_SEAL):
+        return await call.answer(f'💠 حداقل {ENERGY_SEAL} انرژی لازم است.', show_alert=True)
+    # آسیب متقابل از جن
+    dmg = random.randint(DAMAGE_DEMON_HIT_MIN, DAMAGE_DEMON_HIT_MAX // 2)
+    alive, php, died, dmg_msg = await apply_damage(call.from_user.id, dmg)
+    if died:
+        await call.message.edit_text(dmg_msg)
+        return await call.answer('مرگ روحی در نبرد!', show_alert=True)
+    corr = max(0, e['corruption'] - random.randint(4, 10))
+    hp = max(0, e['health'] - random.randint(5, 15))
     await update_encounter(call.from_user.id, did, hp, corr, e['stage'])
     await call.message.edit_text(
-        f'🔮 مهر محافظ فعال شد!\n\n☠️ آلودگی: {corr}%\n❤️ سلامت: {hp}',
+        f'🔮 مهر محافظ فعال شد!\n\n☠️ آلودگی: {corr}%\n❤️ سلامت موجود: {hp}\n{dmg_msg}',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text='🕯️ ادامه پاک‌سازی', callback_data=f'dclean:{did}')]
         ])
     )
-    await call.answer('آلودگی کاهش یافت.')
+    await call.answer('آلودگی کمی کاهش یافت.')
+
 
 @router.callback_query(F.data.startswith('dclean:'))
 async def dclean(call: CallbackQuery):
+    ok_alive, msg = await require_alive(call.from_user.id)
+    if not ok_alive:
+        return await call.answer(msg, show_alert=True)
     did = int(call.data.split(':')[1])
     d = await get_demon(did)
     e = await get_or_create_encounter(call.from_user.id, did)
@@ -509,20 +692,42 @@ async def dclean(call: CallbackQuery):
         return await call.answer('موجود پیدا نشد.', show_alert=True)
     if e['status'] == 'completed':
         return await call.answer('این موجود قبلاً پاک‌سازی شده. از «مبارزه دوباره» استفاده کن.', show_alert=True)
-    if not await spend_energy(call.from_user.id, 2):
-        return await call.answer('💠 انرژی کافی نداری.', show_alert=True)
-    corr = max(0, e['corruption'] - random.randint(15, 30))
-    hp = max(0, e['health'] - random.randint(20, 55))
+    if not await spend_energy(call.from_user.id, ENERGY_CLEAN):
+        return await call.answer(f'💠 حداقل {ENERGY_CLEAN} انرژی لازم است.', show_alert=True)
+    dmg = random.randint(DAMAGE_DEMON_HIT_MIN, DAMAGE_DEMON_HIT_MAX)
+    alive, php, died, dmg_msg = await apply_damage(call.from_user.id, dmg)
+    if died:
+        await call.message.edit_text(dmg_msg)
+        return await call.answer('مرگ روحی در نبرد!', show_alert=True)
+    corr = max(0, e['corruption'] - random.randint(5, 12))
+    hp = max(0, e['health'] - random.randint(8, 22))
     if corr == 0:
+        ok_lim, lim_msg = await check_mission_limit(call.from_user.id, "cleanse")
+        if not ok_lim:
+            await update_encounter(call.from_user.id, did, hp, corr, e['stage'], 'completed')
+            await call.message.edit_text(
+                f'✨ پاک‌سازی کامل شد اما {lim_msg}\nپاداش داده نشد.'
+            )
+            return await call.answer(lim_msg, show_alert=True)
         await update_encounter(call.from_user.id, did, hp, corr, e['stage'], 'completed')
-        final_coins = await add_progress(call.from_user.id, d['reward_coins'], d['reward_xp'], cleanse=True)
+        gems = max(1, int(d['rank']) // 2)
+        coins = max(30, int(d['reward_coins']) // 2)
+        xp = max(20, int(d['reward_xp']) // 2)
+        final_coins, got_gems = await add_progress(
+            call.from_user.id, coins, xp, cleanse=True, gems=gems
+        )
+        await bump_mission_limit(call.from_user.id, "cleanse")
         await call.message.edit_text(
             f'✨ <b>پاک‌سازی کامل شد!</b>\n\n'
             f'😈 {d["name"]} از آلودگی رها شد.\n'
-            f'🪙 +{final_coins} سکه\n✨ +{d["reward_xp"]} XP\n\n'
-            f'می‌توانی بعداً دوباره با او مبارزه کنی.',
+            f'🪙 +{final_coins} سکه\n✨ +{xp} XP\n'
+            f'🔮 +{got_gems} کریستال\n{dmg_msg}\n\n'
+            f'می‌توانی بعداً دوباره مبارزه کنی (هزینه بالا).',
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text='🔄 مبارزه دوباره (۵ انرژی)', callback_data=f'dreset:{did}')],
+                [InlineKeyboardButton(
+                    text=f'🔄 مبارزه دوباره ({ENERGY_RESET} انرژی)',
+                    callback_data=f'dreset:{did}'
+                )],
                 [InlineKeyboardButton(text='🔙 دفتر جن‌ها', callback_data='world:demons')]
             ])
         )
@@ -530,7 +735,7 @@ async def dclean(call: CallbackQuery):
     await update_encounter(call.from_user.id, did, hp, corr, e['stage'] + 1)
     await call.message.edit_text(
         f'🕯️ مرحله پاک‌سازی انجام شد.\n\n'
-        f'☠️ آلودگی باقی‌مانده: {corr}%\n❤️ سلامت موجود: {hp}',
+        f'☠️ آلودگی باقی‌مانده: {corr}%\n❤️ سلامت موجود: {hp}\n{dmg_msg}',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text='🔮 مهر محافظ', callback_data=f'dseal:{did}'),
@@ -538,16 +743,20 @@ async def dclean(call: CallbackQuery):
             ]
         ])
     )
-    await call.answer('ادامه بده!')
+    await call.answer('ادامه بده — مراقب سلامتی‌ات باش!')
+
 
 @router.callback_query(F.data.startswith('dreset:'))
 async def dreset(call: CallbackQuery):
+    ok_alive, msg = await require_alive(call.from_user.id)
+    if not ok_alive:
+        return await call.answer(msg, show_alert=True)
     did = int(call.data.split(':')[1])
     d = await get_demon(did)
     if not d:
         return await call.answer('موجود پیدا نشد.', show_alert=True)
-    if not await spend_energy(call.from_user.id, 5):
-        return await call.answer('💠 برای مبارزه دوباره به ۵ انرژی نیاز داری.', show_alert=True)
+    if not await spend_energy(call.from_user.id, ENERGY_RESET):
+        return await call.answer(f'💠 برای مبارزه دوباره به {ENERGY_RESET} انرژی نیاز داری.', show_alert=True)
     await reset_encounter(call.from_user.id, did)
     e = await get_or_create_encounter(call.from_user.id, did)
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -742,11 +951,117 @@ async def use_item(call:CallbackQuery):
 @router.message(F.text=='🏆 رتبه‌بندی')
 async def rank(message:Message):
     await _safe_user(message.from_user.id, message.from_user.full_name)
-    rows = await top_users() or []
-    if not rows:
-        return await message.reply('🏆 هنوز کسی در رتبه‌بندی نیست.')
-    text = '🏆 <b>تالار راهنمایان</b>\n\n' + ''.join(
-        f"{i}. {r['name']} — سطح {r['level']} | 👻 {r['spirits_sent']} | 😈 {r['cleanses']}\n"
-        for i, r in enumerate(rows, 1)
-    )
+    season_id, season_rows = await top_season(10)
+    all_rows = await top_users() or []
+    text = f'🏆 <b>رتبه‌بندی فصلی</b> ({season_id})\n'
+    text += 'امتیاز از راهنمایی روح و پاک‌سازی جن — هر ماه ریست می‌شود.\n\n'
+    if season_rows:
+        text += ''.join(
+            f"{i}. {r['name']} — ⭐ {r['level']} | 🏅 {r['points']} امتیاز\n"
+            for i, r in enumerate(season_rows, 1)
+        )
+    else:
+        text += 'هنوز کسی در این فصل امتیازی ندارد.\n'
+    text += '\n📜 <b>تالار همیشگی</b>\n'
+    if all_rows:
+        text += ''.join(
+            f"{i}. {r['name']} — سطح {r['level']} | 👻 {r['spirits_sent']} | 😈 {r['cleanses']}\n"
+            for i, r in enumerate(all_rows, 1)
+        )
+    else:
+        text += 'خالی است.'
     await message.reply(text)
+
+
+def _missions_text_and_kb(missions):
+    day = missions[0].get("day", "") if missions else ""
+    lines = [
+        "📜 <b>مأموریت‌های روزانه کریستال</b>",
+        f"📅 امروز: <code>{day}</code>",
+        "پیشرفت فقط با انجام کارها زیاد می‌شود و با باز کردن این صفحه پاک نمی‌شود.",
+        "هر نیمه‌شب (به وقت ایران) مأموریت‌ها عوض می‌شوند.\n",
+    ]
+    buttons = []
+    for m in missions:
+        if m["claimed"]:
+            status = "✅ دریافت‌شده"
+        elif m["done"]:
+            status = "🎁 آماده دریافت"
+        else:
+            status = f"⏳ {m['progress']}/{m['target']}"
+        lines.append(f"{m['title']}\n   {status} · پاداش: 🔮 {m['reward_gems']}")
+        if m["done"] and not m["claimed"]:
+            buttons.append([InlineKeyboardButton(
+                text=f"🎁 دریافت پاداش",
+                callback_data=f"missions:claim:{m['key']}",
+            )])
+    buttons.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="missions:list")])
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+@router.message(Command("missions"))
+@router.message(F.text == "📜 مأموریت‌ها")
+async def missions_cmd(message: Message):
+    await _safe_user(message.from_user.id, message.from_user.full_name)
+    missions = await get_daily_missions(message.from_user.id)
+    text, kb = _missions_text_and_kb(missions)
+    await message.reply(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "missions:list")
+async def missions_list_cb(call: CallbackQuery):
+    await _safe_user(call.from_user.id, call.from_user.full_name)
+    missions = await get_daily_missions(call.from_user.id)
+    text, kb = _missions_text_and_kb(missions)
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        await call.message.answer(text, reply_markup=kb)
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("missions:claim:"))
+async def missions_claim_cb(call: CallbackQuery):
+    await _safe_user(call.from_user.id, call.from_user.full_name)
+    key = call.data.split(":", 2)[2]
+    ok, msg = await claim_mission_reward(call.from_user.id, key)
+    try:
+        await call.answer(msg, show_alert=True)
+    except Exception:
+        pass
+    # همیشه لیست را از دیتابیس دوباره بخوان (ریست نمی‌شود)
+    missions = await get_daily_missions(call.from_user.id)
+    text, kb = _missions_text_and_kb(missions)
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        await call.message.answer(text, reply_markup=kb)
+
+
+@router.message(Command('revive'))
+async def revive_cmd(message: Message):
+    await _safe_user(message.from_user.id, message.from_user.full_name)
+    ok, msg = await revive_with_gems(message.from_user.id, 5)
+    await message.reply(msg if ok else f'❌ {msg}')
+
+
+@router.message(Command('heal'))
+@router.message(F.text == '❤️ شفا')
+async def heal_cmd(message: Message):
+    """شفا با سکه (گرون و کم‌اثر — نسخه سخت)."""
+    u = await _safe_user(message.from_user.id, message.from_user.full_name)
+    if not u:
+        return await message.reply('⚠️ دوباره /start بزن.')
+    cost = 80
+    if int(u['coins'] or 0) < cost:
+        return await message.reply(f'🪙 برای شفا نیاز به {cost} سکه داری.')
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET coins=coins-? WHERE user_id=?", (cost, message.from_user.id)
+        )
+        await db.commit()
+    ok, hp, msg = await heal_user(message.from_user.id, 20)
+    await message.reply(f'{"✅" if ok else "❌"} {msg}\n🪙 -{cost} سکه')

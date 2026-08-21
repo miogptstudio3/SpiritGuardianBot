@@ -144,3 +144,12 @@ CREATE TABLE IF NOT EXISTS users (
             health INTEGER NOT NULL DEFAULT 100,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+
+CREATE TABLE IF NOT EXISTS user_missions (
+            user_id BIGINT NOT NULL,
+            mission_key TEXT NOT NULL,
+            day TEXT NOT NULL,
+            progress INTEGER NOT NULL DEFAULT 0,
+            claimed INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, mission_key, day)
+        );

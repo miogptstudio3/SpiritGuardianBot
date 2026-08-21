@@ -99,6 +99,8 @@ def row_to_user(u):
         "max_health": d.get("max_health") or 100,
         "soul_gems": d.get("soul_gems") or 0,
         "light": d.get("light") or 0,
+        "hunger": d.get("hunger") if d.get("hunger") is not None else 100,
+        "thirst": d.get("thirst") if d.get("thirst") is not None else 100,
         "spirits_sent": d.get("spirits_sent") or 0,
         "cleanses": d.get("cleanses") or 0,
         "mind_power": d.get("mind_power") or 1,
@@ -179,7 +181,10 @@ async def use_item(request):
 async def shop(request):
     rows = await db_all(
         """SELECT id, name, description, category, price_coins, price_gems,
-                  energy_gain, mission_bonus
+                  energy_gain, mission_bonus,
+                  COALESCE(hunger_gain,0) AS hunger_gain,
+                  COALESCE(thirst_gain,0) AS thirst_gain,
+                  COALESCE(health_gain,0) AS health_gain
            FROM shop_items WHERE active=1 ORDER BY category, id"""
     )
     return web.json_response([dict(r) for r in rows])
@@ -380,6 +385,226 @@ async def family_api(request):
     )
 
 
+async def fight_demon(request):
+    """یک مرحله پاک‌سازی جن از وب‌اپ."""
+    import random
+    u = await current_user(request)
+    try:
+        did = int(request.match_info["demon_id"])
+    except ValueError:
+        raise web.HTTPBadRequest(text="شناسه نامعتبر")
+    action = "clean"
+    try:
+        body = await request.json()
+        action = (body.get("action") or "clean").lower()
+    except Exception:
+        pass
+    d = await db_one(
+        "SELECT * FROM demons WHERE id=? AND active=1", (did,)
+    )
+    if not d:
+        raise web.HTTPNotFound(text="موجود پیدا نشد")
+    if (u["energy"] or 0) < 2:
+        raise web.HTTPBadRequest(text="انرژی کافی نیست (حداقل ۲)")
+    hunger = u["hunger"] if "hunger" in u.keys() and u["hunger"] is not None else 100
+    thirst = u["thirst"] if "thirst" in u.keys() and u["thirst"] is not None else 100
+    if int(hunger) < 10:
+        raise web.HTTPBadRequest(text="🍗 خیلی گرسنه‌ای — از فروشگاه خوراکی بخر")
+    if int(thirst) < 10:
+        raise web.HTTPBadRequest(text="💧 خیلی تشنه‌ای — نوشیدنی بنوش")
+
+    e = await db_one(
+        "SELECT * FROM demon_encounters WHERE user_id=? AND demon_id=?",
+        (u["user_id"], did),
+    )
+    if not e:
+        await db_exec(
+            """INSERT INTO demon_encounters(user_id,demon_id,health,corruption,stage,status)
+               VALUES (?,?,?,?,1,'active')
+               ON CONFLICT (user_id, demon_id) DO NOTHING""",
+            (u["user_id"], did, d["health"], d["corruption"]),
+        )
+        e = await db_one(
+            "SELECT * FROM demon_encounters WHERE user_id=? AND demon_id=?",
+            (u["user_id"], did),
+        )
+    if e and e["status"] == "completed":
+        if action == "reset":
+            if (u["energy"] or 0) < 5:
+                raise web.HTTPBadRequest(text="برای مبارزه دوباره ۵ انرژی لازم است")
+            await db_exec(
+                "UPDATE demon_encounters SET health=?, corruption=?, stage=1, status='active' WHERE user_id=? AND demon_id=?",
+                (d["health"], d["corruption"], u["user_id"], did),
+            )
+            await db_exec(
+                "UPDATE users SET energy=energy-5, hunger=GREATEST(0,COALESCE(hunger,100)-5), thirst=GREATEST(0,COALESCE(thirst,100)-4) WHERE user_id=?",
+                (u["user_id"],),
+            )
+            return web.json_response({"ok": True, "message": "مبارزه از نو شروع شد.", "status": "active"})
+        raise web.HTTPBadRequest(text="این موجود قبلاً پاک‌سازی شده. action=reset بفرست.")
+
+    corr_cut = random.randint(15, 30) if action == "clean" else random.randint(12, 24)
+    hp_cut = random.randint(20, 55) if action == "clean" else random.randint(10, 35)
+    corr = max(0, int(e["corruption"]) - corr_cut)
+    hp = max(0, int(e["health"]) - hp_cut)
+    await db_exec(
+        "UPDATE users SET energy=energy-2, hunger=GREATEST(0,COALESCE(hunger,100)-5), thirst=GREATEST(0,COALESCE(thirst,100)-4) WHERE user_id=?",
+        (u["user_id"],),
+    )
+    if corr == 0:
+        await db_exec(
+            "UPDATE demon_encounters SET health=?, corruption=0, status='completed' WHERE user_id=? AND demon_id=?",
+            (hp, u["user_id"], did),
+        )
+        gems = max(1, int(d["rank"] or 1))
+        await db_exec(
+            "UPDATE users SET coins=coins+?, xp=xp+?, soul_gems=soul_gems+?, cleanses=cleanses+1 WHERE user_id=?",
+            (d["reward_coins"], d["reward_xp"], gems, u["user_id"]),
+        )
+        return web.json_response({
+            "ok": True,
+            "message": f"✨ پاک‌سازی کامل!\n🪙 +{d['reward_coins']} 🔮 +{gems}",
+            "status": "completed",
+            "corruption": 0,
+            "health": hp,
+        })
+    stage = int(e["stage"] or 1) + 1
+    await db_exec(
+        "UPDATE demon_encounters SET health=?, corruption=?, stage=?, status='active' WHERE user_id=? AND demon_id=?",
+        (hp, corr, stage, u["user_id"], did),
+    )
+    return web.json_response({
+        "ok": True,
+        "message": f"🕯️ ضربه زدی!\n☠️ آلودگی: {corr}٪\n❤️ سلامت: {hp}",
+        "status": "active",
+        "corruption": corr,
+        "health": hp,
+        "stage": stage,
+    })
+
+
+async def marry_api(request):
+    """پیشنهاد ازدواج با آیدی عددی از وب‌اپ."""
+    u = await current_user(request)
+    try:
+        body = await request.json()
+        target_id = int(body.get("target_id") or 0)
+    except Exception:
+        raise web.HTTPBadRequest(text="آیدی عددی معتبر بفرست: {\"target_id\": 123}")
+    if target_id <= 0 or target_id == u["user_id"]:
+        raise web.HTTPBadRequest(text="آیدی معتبر نیست.")
+    target = await db_one("SELECT user_id, name FROM users WHERE user_id=?", (target_id,))
+    if not target:
+        raise web.HTTPBadRequest(text="بازیکن پیدا نشد. اول باید ربات را استارت کرده باشد.")
+    existing = await db_one(
+        """SELECT id FROM marriages WHERE status='accepted'
+           AND (user1_id=? OR user2_id=? OR user1_id=? OR user2_id=?)""",
+        (u["user_id"], u["user_id"], target_id, target_id),
+    )
+    if existing:
+        raise web.HTTPBadRequest(text="یکی از شما متأهل است.")
+    pending = await db_one(
+        """SELECT id FROM marriages WHERE status='pending'
+           AND ((user1_id=? AND user2_id=?) OR (user1_id=? AND user2_id=?))""",
+        (u["user_id"], target_id, target_id, u["user_id"]),
+    )
+    if pending:
+        raise web.HTTPBadRequest(text="پیشنهاد در انتظار پاسخ است.")
+    await db_exec(
+        "INSERT INTO marriages(user1_id,user2_id,status) VALUES (?,?,?)",
+        (u["user_id"], target_id, "pending"),
+    )
+    return web.json_response({
+        "ok": True,
+        "message": f"💍 پیشنهاد ازدواج برای {target['name']} ({target_id}) ثبت شد. طرف مقابل در ربات یا وب‌اپ می‌تواند قبول کند.",
+    })
+
+
+async def marry_respond_api(request):
+    u = await current_user(request)
+    try:
+        body = await request.json()
+        proposal_id = int(body.get("proposal_id") or 0)
+        accept = bool(body.get("accept"))
+    except Exception:
+        raise web.HTTPBadRequest(text="proposal_id و accept لازم است")
+    row = await db_one(
+        "SELECT * FROM marriages WHERE id=? AND user2_id=? AND status='pending'",
+        (proposal_id, u["user_id"]),
+    )
+    if not row:
+        raise web.HTTPNotFound(text="پیشنهاد معتبر نیست")
+    status = "accepted" if accept else "rejected"
+    await db_exec("UPDATE marriages SET status=? WHERE id=?", (status, proposal_id))
+    return web.json_response({
+        "ok": True,
+        "message": "💍 ازدواج ثبت شد!" if accept else "پیشنهاد رد شد.",
+        "status": status,
+    })
+
+
+async def chat_list_api(request):
+    u = await current_user(request)
+    try:
+        with_id = int(request.rel_url.query.get("with") or 0)
+    except ValueError:
+        with_id = 0
+    if with_id:
+        rows = await db_all(
+            """SELECT c.*, uf.name from_name, ut.name to_name
+               FROM player_chat c
+               JOIN users uf ON uf.user_id=c.from_id
+               JOIN users ut ON ut.user_id=c.to_id
+               WHERE (c.from_id=? AND c.to_id=?) OR (c.from_id=? AND c.to_id=?)
+               ORDER BY c.id DESC LIMIT 50""",
+            (u["user_id"], with_id, with_id, u["user_id"]),
+        )
+    else:
+        rows = await db_all(
+            """SELECT c.*, uf.name from_name, ut.name to_name
+               FROM player_chat c
+               JOIN users uf ON uf.user_id=c.from_id
+               JOIN users ut ON ut.user_id=c.to_id
+               WHERE c.from_id=? OR c.to_id=?
+               ORDER BY c.id DESC LIMIT 40""",
+            (u["user_id"], u["user_id"]),
+        )
+    return web.json_response([dict(r) for r in reversed(list(rows))])
+
+
+async def chat_send_api(request):
+    u = await current_user(request)
+    try:
+        body = await request.json()
+        to_id = int(body.get("to_id") or 0)
+        text = (body.get("text") or "").strip()[:500]
+    except Exception:
+        raise web.HTTPBadRequest(text="to_id و text لازم است")
+    if to_id <= 0 or to_id == u["user_id"] or not text:
+        raise web.HTTPBadRequest(text="پیام یا گیرنده نامعتبر است")
+    target = await db_one("SELECT user_id FROM users WHERE user_id=?", (to_id,))
+    if not target:
+        raise web.HTTPBadRequest(text="گیرنده پیدا نشد")
+    # ensure table
+    try:
+        await db_exec(
+            """CREATE TABLE IF NOT EXISTS player_chat (
+                id INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+                from_id BIGINT NOT NULL,
+                to_id BIGINT NOT NULL,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+    except Exception:
+        pass
+    await db_exec(
+        "INSERT INTO player_chat(from_id,to_id,body) VALUES (?,?,?)",
+        (u["user_id"], to_id, text),
+    )
+    return web.json_response({"ok": True, "message": "پیام ارسال شد."})
+
+
 async def index(request):
     return web.FileResponse(os.path.join(BASE_DIR, "index.html"))
 
@@ -421,6 +646,11 @@ app.add_routes(
         web.post("/api/daily", daily_api),
         web.post("/api/upgrade_coins", upgrade_coins_api),
         web.get("/api/family", family_api),
+        web.post("/api/demons/{demon_id}/fight", fight_demon),
+        web.post("/api/marry", marry_api),
+        web.post("/api/marry/respond", marry_respond_api),
+        web.get("/api/chat", chat_list_api),
+        web.post("/api/chat", chat_send_api),
         web.static("/static", os.path.join(BASE_DIR, "static")),
     ]
 )

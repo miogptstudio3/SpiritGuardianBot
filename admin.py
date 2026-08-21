@@ -39,11 +39,45 @@ async def require_perm(event, perm):
     return role
 
 async def can_manage_target(actor_id, target_id):
+    """فقط رتبهٔ بالاتر می‌تواند رتبهٔ پایین‌تر را مدیریت کند.
+    سازنده اصلی، خودِ ادمین، و هم‌سطح/بالاتر محافظت‌شده‌اند."""
     if target_id == CREATOR_ID:
         return False
+    if actor_id == target_id:
+        return False  # کسی نمی‌تواند خودش را از پنل مدیریت کند
     actor_role = await get_role(actor_id)
     target_role = await get_role(target_id)
+    # ویژه می‌تواند همه غیر از سازنده اصلی را مدیریت کند
+    if actor_role == "ویژه" and target_id != CREATOR_ID:
+        return True
     return ROLE_LEVELS.get(actor_role, 0) > ROLE_LEVELS.get(target_role, 0)
+
+
+async def guard_manage(event, target_id: int) -> bool:
+    """اگر مجاز نباشد پیام می‌دهد و False برمی‌گرداند."""
+    if not await can_manage_target(event.from_user.id, target_id):
+        await deny(event)
+        try:
+            if hasattr(event, "answer") and callable(event.answer):
+                from aiogram.types import CallbackQuery
+                if isinstance(event, CallbackQuery):
+                    await event.answer(
+                        "⛔ نمی‌توانی این کاربر را مدیریت کنی "
+                        "(هم‌سطح، بالاتر، خودت، یا سازنده اصلی).",
+                        show_alert=True,
+                    )
+        except Exception:
+            pass
+        try:
+            if hasattr(event, "reply"):
+                await event.reply(
+                    "⛔ نمی‌توانی این کاربر را مدیریت کنی "
+                    "(هم‌سطح، بالاتر، خودت، یا سازنده اصلی)."
+                )
+        except Exception:
+            pass
+        return False
+    return True
 
 def back():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -132,28 +166,46 @@ async def usersearch(message:Message):
     if not term: return await message.reply("فرمت: /usersearch نام یا ID")
     rows=await search_users(term)
     if not rows: return await message.reply("🔎 کاربری پیدا نشد.")
-    await message.reply("🔎 <b>نتایج جستجو</b>\n\nکاربر را انتخاب کن:",reply_markup=user_buttons(rows))
+    # فقط کسانی که این ادمین حق مدیریتشان را دارد
+    visible = []
+    for r in rows:
+        uid = r["user_id"]
+        if uid == CREATOR_ID and message.from_user.id != CREATOR_ID:
+            continue
+        if await can_manage_target(message.from_user.id, uid):
+            visible.append(r)
+    if not visible:
+        return await message.reply(
+            "🔎 کاربری که بتوانی مدیریت کنی پیدا نشد.\n"
+            "(کاربران هم‌سطح/بالاتر و حساب سازنده از پنل تو مخفی‌اند.)"
+        )
+    await message.reply("🔎 <b>نتایج جستجو</b>\n\nکاربر را انتخاب کن:",reply_markup=user_buttons(visible))
 
 @router.callback_query(F.data.startswith("usr:"))
 async def user_page(call:CallbackQuery):
     role=await get_role(call.from_user.id)
     if not can(role,"users"): return await deny(call)
     uid=int(call.data.split(":")[1])
-    if uid == CREATOR_ID:
-        return await call.answer('🔒 حساب سازنده قابل مدیریت نیست.', show_alert=True)
+    if not await guard_manage(call, uid):
+        return
     user,mod,wc=await get_full_user(uid)
     if not user: return await call.answer("کاربر پیدا نشد.",show_alert=True)
+    target_role = await get_role(uid)
     ban="🚫 مسدود" if mod and mod["banned"] else "✅ آزاد"
-    await call.message.edit_text(f"👤 <b>{user['name']}</b>\nID: <code>{uid}</code>\nوضعیت: {ban}\n⚠️ اخطار: {wc}\n\nاز منو انتخاب کن:",reply_markup=user_panel(uid))
+    await call.message.edit_text(
+        f"👤 <b>{user['name']}</b>\nID: <code>{uid}</code>\n"
+        f"رتبه: {target_role}\nوضعیت: {ban}\n⚠️ اخطار: {wc}\n\nاز منو انتخاب کن:",
+        reply_markup=user_panel(uid)
+    )
     await call.answer()
 
 @router.callback_query(F.data.startswith("upro:"))
 async def user_profile(call:CallbackQuery):
     role=await get_role(call.from_user.id)
     if not can(role,"users"): return await deny(call)
-    uid=int(call.data.split(":")[1]);
-    if uid == CREATOR_ID:
-        return await call.answer('🔒 حساب سازنده قابل مدیریت نیست.', show_alert=True)
+    uid=int(call.data.split(":")[1])
+    if not await guard_manage(call, uid):
+        return
     u,m,w=await get_full_user(uid)
     if not u: return await call.answer("کاربر پیدا نشد.",show_alert=True)
     await call.message.edit_text(
@@ -168,7 +220,10 @@ async def user_profile(call:CallbackQuery):
 async def user_inv(call:CallbackQuery):
     role=await get_role(call.from_user.id)
     if not can(role,"users"): return await deny(call)
-    uid=int(call.data.split(":")[1]); rows=await get_inventory_for_admin(uid)
+    uid=int(call.data.split(":")[1])
+    if not await guard_manage(call, uid):
+        return
+    rows=await get_inventory_for_admin(uid)
     t="🎒 <b>موجودی کاربر</b>\n\n"+("".join(f"{x['name']} × {x['quantity']}\n" for x in rows) or "کوله‌پشتی خالی است.")
     await call.message.edit_text(t,reply_markup=user_panel(uid))
     await call.answer()
@@ -178,12 +233,15 @@ async def edit_help(call:CallbackQuery):
     role=await get_role(call.from_user.id)
     if not can(role,"give"): return await deny(call)
     _,uid,kind=call.data.split(":")
+    uid=int(uid)
+    if not await guard_manage(call, uid):
+        return
     texts={
         "resources":f"💰 منابع کاربر <code>{uid}</code>\n\n/give {uid} coins energy\nبرای کریستال: /setgems {uid} مقدار\n",
         "health":f"❤️ سلامتی <code>{uid}</code>\n\n/sethealth {uid} مقدار\nمثال: /sethealth {uid} 100",
         "level":f"⭐ سطح <code>{uid}</code>\n\n/setlevel {uid} سطح\nمثال: /setlevel {uid} 10"
     }
-    await call.message.edit_text(texts[kind],reply_markup=user_panel(int(uid)))
+    await call.message.edit_text(texts[kind],reply_markup=user_panel(uid))
     await call.answer()
 
 @router.callback_query(F.data.startswith("uwarn:"))
@@ -191,6 +249,8 @@ async def warn_help(call:CallbackQuery):
     role=await get_role(call.from_user.id)
     if not can(role,"ban"): return await deny(call)
     uid=int(call.data.split(":")[1])
+    if not await guard_manage(call, uid):
+        return
     await call.message.edit_text(f"⚠️ اخطار به <code>{uid}</code>\n\n/warn {uid} دلیل اخطار",reply_markup=user_panel(uid))
     await call.answer()
 
@@ -200,14 +260,12 @@ async def ban_help(call:CallbackQuery):
     if not can(role,"ban"): return await deny(call)
     _,uid,kind=call.data.split(":")
     uid=int(uid)
+    if not await guard_manage(call, uid):
+        return
     if kind=="clear":
-        if not await can_manage_target(call.from_user.id, uid):
-            return await call.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را مدیریت کنی.", show_alert=True)
         await clear_ban(uid); await add_admin_log(call.from_user.id,"رفع بن",uid,"از پنل")
         await call.message.edit_text("♻️ بن کاربر برداشته شد.",reply_markup=user_panel(uid))
     else:
-        if not await can_manage_target(call.from_user.id, uid):
-            return await call.answer("⛔ نمی‌توانی کاربری هم‌سطح یا بالاتر را مدیریت کنی.", show_alert=True)
         await call.message.edit_text(f"🚫 بن موقت <code>{uid}</code>\n\n/tempban {uid} دقیقه دلیل",reply_markup=user_panel(uid))
     await call.answer()
 
@@ -263,8 +321,8 @@ async def tempban(message:Message):
     p=message.text.split(maxsplit=2)
     if len(p)<3 or not p[1].isdigit() or not p[2].split()[0].isdigit(): return await message.reply("فرمت: /tempban ID دقیقه دلیل")
     uid=int(p[1]); mins=int(p[2].split()[0]); reason=" ".join(p[2].split()[1:]) or "بدون دلیل"
-    target_role=await get_role(uid)
-    if ROLE_LEVELS[target_role]>=ROLE_LEVELS[role]: return await message.reply("⛔ این کاربر رتبه هم‌سطح یا بالاتر دارد.")
+    if not await can_manage_target(message.from_user.id, uid):
+        return await message.reply("⛔ نمی‌توانی این کاربر را مدیریت کنی (هم‌سطح، بالاتر، خودت، یا سازنده).")
     until=(datetime.now(timezone.utc)+timedelta(minutes=mins)).isoformat()
     await set_temporary_ban(uid,until,reason); await add_admin_log(message.from_user.id,"بن موقت",uid,f"{mins} دقیقه: {reason}")
     await message.reply(f"🚫 کاربر به مدت {mins} دقیقه بن شد.")
