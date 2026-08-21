@@ -11,10 +11,10 @@ def menu():
             [KeyboardButton(text="👻 ارواح"), KeyboardButton(text="😈 جن‌ها")],
             [KeyboardButton(text="🗺️ جهان"), KeyboardButton(text="🛡️ پاک‌سازی")],
             [KeyboardButton(text="📜 مأموریت‌ها"), KeyboardButton(text="👤 پروفایل")],
-            [KeyboardButton(text="💰 موجودی"), KeyboardButton(text="🛒 فروشگاه")],
-            [KeyboardButton(text="🎒 کوله‌پشتی"), KeyboardButton(text="🎁 جایزه روزانه")],
-            [KeyboardButton(text="🏆 رتبه‌بندی"), KeyboardButton(text="❓ راهنما")],
-            [KeyboardButton(text="⚙️ مدیریت")]
+            [KeyboardButton(text="💰 موجودی"), KeyboardButton(text="💰 ارتقای سکه")],
+            [KeyboardButton(text="🛒 فروشگاه"), KeyboardButton(text="🎒 کوله‌پشتی")],
+            [KeyboardButton(text="🎁 جایزه روزانه"), KeyboardButton(text="🏆 رتبه‌بندی")],
+            [KeyboardButton(text="❓ راهنما"), KeyboardButton(text="⚙️ مدیریت")]
         ],
         resize_keyboard=True
     )
@@ -65,7 +65,9 @@ async def help_cmd(message: Message):
         "📜 مأموریت‌ها — مأموریت‌های در دسترس\n"
         "👤 پروفایل — وضعیت شخصیت\n"
         "💰 موجودی — سکه و انرژی\n"
+        "💰 ارتقای سکه — افزایش درصد پاداش سکه از مأموریت‌ها (تا +۵۰٪)\n"
         "🎁 جایزه روزانه — دریافت پاداش روزانه\n"
         "🏆 رتبه‌بندی — برترین محافظان\n\n"
-        "هرچه مأموریت بیشتری انجام بدهی، سطح و پاداش‌هایت بیشتر می‌شود."
+        "هرچه مأموریت بیشتری انجام بدهی، سطح و پاداش‌هایت بیشتر می‌شود.\n"
+        "با ارتقای سکه می‌توانی پاداش مأموریت‌ها را قوی‌تر کنی."
     )

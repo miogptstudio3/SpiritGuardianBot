@@ -217,6 +217,7 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN spirit_power INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE users ADD COLUMN training_points INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN last_training TEXT",
+            "ALTER TABLE users ADD COLUMN coin_boost INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 await db.execute(statement)
@@ -263,6 +264,9 @@ async def init_db():
                 ("جن سرکش","جن سرکش",2,90,35,220,70,"خصمانه","موج سایه","موجودی که به یک مکان متروکه وابسته شده است.",1,140,90),
                 ("سایه‌خوار","سایه آلوده",3,140,55,420,84,"خنثی","بلعیدن انرژی","موجودی که از ترس بازدیدکنندگان نیرو می‌گیرد.",2,240,160),
                 ("نگهبان سیاه","موجود نفرین‌شده",5,260,100,850,96,"نگهبان","مهر تاریکی","نگهبانی که زیر یک نفرین قدیمی گرفتار شده است.",5,600,420),
+                ("زوزه‌گر مه","جن جنگلی",2,110,40,280,65,"وحشی","زوزه ترس","در مه جنگل ظاهر می‌شود و مسیر را گم می‌کند.",2,170,115),
+                ("اشک‌خور","روح آلوده",4,180,70,520,88,"غمگین","بلعیدن خاطره","از غم انسان‌ها تغذیه می‌کند و خاطرات را می‌دزدد.",3,320,220),
+                ("مهره‌دار دروازه","نگهبان باستانی",6,300,120,1100,98,"سنگین","قفل ابدی","از دروازه دنیای پسین محافظت می‌کند و تنها با نور پسین ضعیف می‌شود.",8,900,650),
             ])
         cur=await db.execute("SELECT COUNT(*) FROM currencies")
         if (await cur.fetchone())[0] == 0:
@@ -370,19 +374,68 @@ async def get_user(user_id: int):
         cur = await db.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
         return await cur.fetchone()
 
-async def add_progress(user_id: int, coins: int, xp: int, spirit: bool=False, cleanse: bool=False):
+async def add_progress(user_id: int, coins: int, xp: int, spirit: bool = False, cleanse: bool = False):
+    """اضافه کردن پاداش با در نظر گرفتن ارتقای سکه (coin_boost)."""
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT coin_boost FROM users WHERE user_id=?", (user_id,))
+        row = await cur.fetchone()
+        boost = int(row["coin_boost"] or 0) if row else 0
+        # هر سطح ارتقا ۵٪ سکه بیشتر (حداکثر +۵۰٪)
+        bonus_pct = min(boost * 5, 50)
+        final_coins = int(coins * (100 + bonus_pct) / 100)
         await db.execute(
             """UPDATE users SET coins=coins+?, xp=xp+?,
                spirits_sent=spirits_sent+?, cleanses=cleanses+?
                WHERE user_id=?""",
-            (coins, xp, int(spirit), int(cleanse), user_id)
+            (final_coins, xp, int(spirit), int(cleanse), user_id)
         )
         await db.execute(
             """UPDATE users SET level = 1 + CAST(xp / 250 AS INTEGER)
                WHERE user_id=?""", (user_id,)
         )
         await db.commit()
+        return final_coins
+
+async def upgrade_coin_boost(user_id: int):
+    """
+    ارتقای سطح سکه با هزینه تصاعدی سکه و کریستال.
+    سطح ۰→۱: 500 سکه + 2 کریستال
+    هر سطح بعدی هزینه ×۱.۶ و +۱ کریستال بیشتر.
+    حداکثر سطح ۱۰ (+۵۰٪ پاداش سکه).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT coins, soul_gems, coin_boost FROM users WHERE user_id=?", (user_id,)
+        )
+        row = await cur.fetchone()
+        if not row:
+            return False, "کاربر پیدا نشد."
+        level = int(row["coin_boost"] or 0)
+        if level >= 10:
+            return False, "ارتقای سکه به حداکثر سطح (۱۰) رسیده است. (+۵۰٪ پاداش)"
+        cost_coins = int(500 * (1.6 ** level))
+        cost_gems = 2 + level
+        if row["coins"] < cost_coins or row["soul_gems"] < cost_gems:
+            return False, (
+                f"منابع کافی نیست.\n"
+                f"نیاز: 🪙 {cost_coins} سکه + 🔮 {cost_gems} کریستال\n"
+                f"موجودی: 🪙 {row['coins']} | 🔮 {row['soul_gems']}"
+            )
+        new_level = level + 1
+        await db.execute(
+            "UPDATE users SET coins=coins-?, soul_gems=soul_gems-?, coin_boost=? WHERE user_id=?",
+            (cost_coins, cost_gems, new_level, user_id)
+        )
+        await db.commit()
+        bonus = min(new_level * 5, 50)
+        return True, (
+            f"✅ کیف پول ارتقا یافت!\n"
+            f"سطح ارتقا: {new_level}/10\n"
+            f"پاداش سکه از این به بعد: +{bonus}٪\n"
+            f"هزینه پرداخت‌شده: 🪙 {cost_coins} + 🔮 {cost_gems}"
+        )
 
 async def list_spirits():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -832,18 +885,63 @@ async def get_demon(did):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory=aiosqlite.Row; cur=await db.execute("SELECT d.*,r.name region_name FROM demons d JOIN regions r ON r.id=d.region_id WHERE d.id=? AND d.active=1",(did,)); return await cur.fetchone()
 
-async def get_or_create_encounter(user_id,did):
-    d=await get_demon(did)
-    if not d:return None
+async def get_or_create_encounter(user_id, did):
+    """برگرداندن یا ساخت encounter جن برای کاربر. همیشه Row (dict-like) برمی‌گرداند."""
+    d = await get_demon(did)
+    if not d:
+        return None
     async with aiosqlite.connect(DB_PATH) as db:
-        cur=await db.execute("SELECT * FROM demon_encounters WHERE user_id=? AND demon_id=?",(user_id,did)); row=await cur.fetchone()
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM demon_encounters WHERE user_id=? AND demon_id=?",
+            (user_id, did)
+        )
+        row = await cur.fetchone()
         if not row:
-            await db.execute("INSERT INTO demon_encounters(user_id,demon_id,health,corruption,stage) VALUES (?,?,?,?,1)",(user_id,did,d['health'],d['corruption'])); await db.commit()
-        cur=await db.execute("SELECT * FROM demon_encounters WHERE user_id=? AND demon_id=?",(user_id,did)); return await cur.fetchone()
+            await db.execute(
+                "INSERT INTO demon_encounters(user_id,demon_id,health,corruption,stage,status) VALUES (?,?,?,?,1,'active')",
+                (user_id, did, d["health"], d["corruption"])
+            )
+            await db.commit()
+            cur = await db.execute(
+                "SELECT * FROM demon_encounters WHERE user_id=? AND demon_id=?",
+                (user_id, did)
+            )
+            row = await cur.fetchone()
+        return row
 
-async def update_encounter(user_id,did,health,corruption,stage,status='active'):
+async def update_encounter(user_id, did, health, corruption, stage, status="active"):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE demon_encounters SET health=?,corruption=?,stage=?,status=? WHERE user_id=? AND demon_id=?",(health,corruption,stage,status,user_id,did)); await db.commit()
+        await db.execute(
+            "UPDATE demon_encounters SET health=?, corruption=?, stage=?, status=? WHERE user_id=? AND demon_id=?",
+            (health, corruption, stage, status, user_id, did)
+        )
+        await db.commit()
+
+async def reset_encounter(user_id, did):
+    """اجازه مبارزه دوباره با جن بعد از پاک‌سازی (با هزینه کمی سکه/انرژی در لایه بازی)."""
+    d = await get_demon(did)
+    if not d:
+        return False
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE demon_encounters SET health=?, corruption=?, stage=1, status='active' WHERE user_id=? AND demon_id=?",
+            (d["health"], d["corruption"], user_id, did)
+        )
+        await db.commit()
+    return True
+
+async def spend_energy(user_id: int, amount: int) -> bool:
+    """کم کردن انرژی؛ اگر کافی نباشد False برمی‌گرداند."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT energy FROM users WHERE user_id=?", (user_id,))
+        row = await cur.fetchone()
+        if not row or row["energy"] < amount:
+            return False
+        await db.execute("UPDATE users SET energy=energy-? WHERE user_id=?", (amount, user_id))
+        await db.commit()
+        return True
 
 async def add_light(user_id,amount):
     async with aiosqlite.connect(DB_PATH) as db:

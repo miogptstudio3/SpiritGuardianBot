@@ -1,1 +1,146 @@
-<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>نگهبان ارواح | Web App</title><script src="https://telegram.org/js/telegram-web-app.js"></script><link rel="stylesheet" href="/static/app.css"></head><body><main class="app"><header><div><span class="eyebrow">SPIRIT GUARDIAN</span><h1>نگهبان ارواح</h1><p>جهان داستانی، رشد شخصیت و مأموریت‌های رازآلود</p></div><button id="refresh" class="icon">↻</button></header><section id="notice" class="notice hidden"></section><section class="hero card"><div><span>سطح</span><strong id="level">—</strong></div><div><span>XP</span><strong id="xp">—</strong></div><div><span>سکه</span><strong id="coins">—</strong></div><div><span>انرژی</span><strong id="energy">—</strong></div></section><nav class="tabs"><button data-tab="home" class="active">🏠 خانه</button><button data-tab="inventory">🎒 کیف</button><button data-tab="shop">🛒 فروشگاه</button><button data-tab="stories">📖 داستان</button></nav><section id="home" class="tab active"><div class="grid"><article class="card action"><h2>🧠 پرورش ذهن</h2><p>هر روز یک تمرین ذهنی انجام بده و قدرت ذهن و XP بگیر.</p><button id="train">تمرین امروز</button></article><article class="card"><h2>⚔️ وضعیت شخصیت</h2><div class="stats"><span>🧠 ذهن <b id="mind">—</b></span><span>💪 بدن <b id="body">—</b></span><span>✨ روح <b id="spirit">—</b></span><span>🔮 نور <b id="light">—</b></span></div></article></div><article class="card"><h2>🗺️ جهان زنده</h2><p>پرونده‌های سخت‌تر را باز کن، سرنخ‌ها را دنبال کن و با موجودات فانتزی روبه‌رو شو.</p><button class="ghost" onclick="showTab('stories')">مشاهده پرونده‌ها</button></article><article class="card"><h2>💍 خانواده</h2><p id="family">در حال بارگذاری...</p></article></section><section id="inventory" class="tab"><div class="section-head"><h2>🎒 کیف</h2><button class="ghost" id="invRefresh">به‌روزرسانی</button></div><div id="inventoryList" class="list"></div></section><section id="shop" class="tab"><div class="section-head"><h2>🛒 فروشگاه</h2></div><div id="shopList" class="list"></div></section><section id="stories" class="tab"><div class="section-head"><h2>📖 پرونده‌های ارواح</h2><span class="muted">سختی‌های ۴ تا ۷</span></div><div id="storyList" class="stories"></div></section></main><script src="/static/app.js"></script></body></html>
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0a0c14">
+  <title>نگهبان ارواح | Web App</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div id="loader" class="loader">
+    <div class="orb"></div>
+    <p>در حال ورود به مرز دو جهان…</p>
+  </div>
+
+  <main class="app hidden" id="app">
+    <header class="top">
+      <div class="identity">
+        <span class="eyebrow">SPIRIT GUARDIAN</span>
+        <h1 id="playerName">نگهبان ارواح</h1>
+        <p class="sub">مرز میان دو جهان</p>
+      </div>
+      <button id="refresh" class="icon-btn" title="به‌روزرسانی">↻</button>
+    </header>
+
+    <section id="notice" class="notice hidden"></section>
+
+    <!-- Hero stats -->
+    <section class="hero card">
+      <div><span>سطح</span><strong id="level">—</strong></div>
+      <div><span>XP</span><strong id="xp">—</strong></div>
+      <div><span>سکه</span><strong id="coins">—</strong></div>
+      <div><span>انرژی</span><strong id="energy">—</strong></div>
+      <div><span>کریستال</span><strong id="gems">—</strong></div>
+      <div><span>نور</span><strong id="light">—</strong></div>
+    </section>
+
+    <!-- Tabs -->
+    <nav class="tabs" id="tabs">
+      <button data-tab="home" class="active">🏠 خانه</button>
+      <button data-tab="demons">😈 جن‌ها</button>
+      <button data-tab="stories">👻 ارواح</button>
+      <button data-tab="shop">🛒 فروشگاه</button>
+      <button data-tab="inventory">🎒 کیف</button>
+      <button data-tab="rank">🏆 رتبه</button>
+      <button data-tab="upgrade">💰 ارتقا</button>
+    </nav>
+
+    <!-- HOME -->
+    <section id="home" class="tab active">
+      <div class="grid-2">
+        <article class="card action">
+          <h2>🧠 پرورش ذهن</h2>
+          <p>هر ۵ دقیقه یک تمرین — قدرت ذهن و XP بگیر.</p>
+          <button id="trainBtn" class="primary">تمرین ذهن</button>
+        </article>
+        <article class="card action">
+          <h2>🎁 جایزه روزانه</h2>
+          <p>هر روز ۱۰۰ سکه + ۵ انرژی رایگان.</p>
+          <button id="dailyBtn" class="primary">دریافت پاداش</button>
+        </article>
+      </div>
+
+      <article class="card">
+        <h2>⚔️ وضعیت شخصیت</h2>
+        <div class="stats">
+          <span>🧠 ذهن <b id="mind">—</b></span>
+          <span>💪 بدن <b id="body">—</b></span>
+          <span>✨ روح <b id="spirit">—</b></span>
+          <span>🏅 تمرین <b id="training">—</b></span>
+          <span>👻 ارواح <b id="spiritsSent">—</b></span>
+          <span>😈 پاک‌سازی <b id="cleanses">—</b></span>
+          <span>❤️ سلامتی <b id="health">—</b></span>
+          <span>💰 بونوس سکه <b id="coinBonus">—</b></span>
+        </div>
+      </article>
+
+      <article class="card">
+        <h2>🗺️ مناطق جهان</h2>
+        <div id="regionsList" class="chips"></div>
+      </article>
+
+      <article class="card">
+        <h2>💍 خانواده</h2>
+        <p id="familyText">در حال بارگذاری…</p>
+      </article>
+    </section>
+
+    <!-- DEMONS -->
+    <section id="demons" class="tab">
+      <div class="section-head">
+        <h2>😈 دفتر جن‌ها و موجودات</h2>
+        <button class="ghost" id="demonsRefresh">↻</button>
+      </div>
+      <div id="demonsList" class="list"></div>
+    </section>
+
+    <!-- STORIES -->
+    <section id="stories" class="tab">
+      <div class="section-head">
+        <h2>👻 پرونده‌های ارواح</h2>
+        <button class="ghost" id="storiesRefresh">↻</button>
+      </div>
+      <div id="storyList" class="list"></div>
+    </section>
+
+    <!-- SHOP -->
+    <section id="shop" class="tab">
+      <div class="section-head"><h2>🛒 فروشگاه</h2></div>
+      <div id="shopList" class="list"></div>
+    </section>
+
+    <!-- INVENTORY -->
+    <section id="inventory" class="tab">
+      <div class="section-head">
+        <h2>🎒 کوله‌پشتی</h2>
+        <button class="ghost" id="invRefresh">↻</button>
+      </div>
+      <div id="inventoryList" class="list"></div>
+    </section>
+
+    <!-- RANK -->
+    <section id="rank" class="tab">
+      <div class="section-head"><h2>🏆 تالار راهنمایان</h2></div>
+      <div id="rankList" class="list"></div>
+    </section>
+
+    <!-- UPGRADE -->
+    <section id="upgrade" class="tab">
+      <article class="card upgrade-card">
+        <h2>💰 ارتقای کیف پول</h2>
+        <p>هر سطح ارتقا، <b>۵٪</b> به پاداش سکه مأموریت‌ها اضافه می‌کند (حداکثر +۵۰٪).</p>
+        <div class="upgrade-stats">
+          <div><span>سطح فعلی</span><strong id="boostLevel">0/10</strong></div>
+          <div><span>بونوس</span><strong id="boostPct">+0٪</strong></div>
+        </div>
+        <div class="cost-box" id="upgradeCost">—</div>
+        <button id="upgradeBtn" class="primary full">⬆️ ارتقا بده</button>
+      </article>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

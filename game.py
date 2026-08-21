@@ -2,9 +2,16 @@ import random
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from database import (ensure_user,get_user,top_users,daily_claim,list_shop_items,get_shop_item,buy_shop_item,get_inventory,use_inventory_item,
-    list_regions,get_region,list_story_spirits,get_story_spirit,get_next_clue,advance_spirit,list_demons,get_demon,get_or_create_encounter,update_encounter,add_progress,
-    create_marriage_proposal,get_pending_proposal,respond_marriage,get_marriage,list_children,adopt_child,care_for_child,train_mind,get_training_stats)
+from database import (
+    ensure_user, get_user, top_users, daily_claim, list_shop_items, get_shop_item,
+    buy_shop_item, get_inventory, use_inventory_item, list_regions, get_region,
+    list_story_spirits, get_story_spirit, get_next_clue, advance_spirit,
+    list_demons, get_demon, get_or_create_encounter, update_encounter, reset_encounter,
+    add_progress, spend_energy, upgrade_coin_boost, create_marriage_proposal,
+    get_pending_proposal, respond_marriage, get_marriage, list_children,
+    adopt_child, care_for_child, train_mind, get_training_stats, DB_PATH
+)
+import aiosqlite
 
 router=Router()
 
@@ -53,14 +60,68 @@ async def training_stats(message:Message):
     )
 
 @router.message(Command('profile'))
-@router.message(F.text=='👤 پروفایل')
-async def profile(message:Message):
-    await ensure_user(message.from_user.id,message.from_user.full_name); u=await get_user(message.from_user.id)
-    await message.reply(f'''👤 <b>پروفایل راهنمای ارواح</b>\n\nنام: {u['name']}\n⭐ سطح راهنمایی: {u['level']}\n✨ تجربه: {u['xp']}\n❤️ سلامتی: {u['health']}/{u['max_health']}\n💠 انرژی روحی: {u['energy']}\n🪙 سکه: {u['coins']}\n🔮 کریستال سایه: {u['soul_gems']}\n✨ نور پسین: {u['light']}\n👻 ارواح راهی‌شده: {u['spirits_sent']}\n😈 پاک‌سازی‌ها: {u['cleanses']}
+@router.message(F.text == '👤 پروفایل')
+async def profile(message: Message):
+    await ensure_user(message.from_user.id, message.from_user.full_name)
+    u = await get_user(message.from_user.id)
+    boost = int(u['coin_boost'] or 0) if 'coin_boost' in u.keys() else 0
+    bonus = min(boost * 5, 50)
+    await message.reply(
+        f'''👤 <b>پروفایل راهنمای ارواح</b>
+
+نام: {u['name']}
+⭐ سطح راهنمایی: {u['level']}
+✨ تجربه: {u['xp']}
+❤️ سلامتی: {u['health']}/{u['max_health']}
+💠 انرژی روحی: {u['energy']}
+🪙 سکه: {u['coins']}
+🔮 کریستال سایه: {u['soul_gems']}
+✨ نور پسین: {u['light']}
+💰 ارتقای سکه: سطح {boost}/10 (+{bonus}٪ پاداش)
+👻 ارواح راهی‌شده: {u['spirits_sent']}
+😈 پاک‌سازی‌ها: {u['cleanses']}
 🧠 قدرت ذهن: {u['mind_power']}
 💪 قدرت جسم: {u['body_power']}
 🔮 قدرت روح: {u['spirit_power']}
-🏅 امتیاز تمرین: {u['training_points']}''',reply_markup=main_game_kb())
+🏅 امتیاز تمرین: {u['training_points']}''',
+        reply_markup=main_game_kb()
+    )
+
+@router.message(Command('upgrade_coins'))
+@router.message(F.text == '💰 ارتقای سکه')
+@router.message(F.text == 'ارتقای سکه')
+async def upgrade_coins_cmd(message: Message):
+    await ensure_user(message.from_user.id, message.from_user.full_name)
+    u = await get_user(message.from_user.id)
+    boost = int(u['coin_boost'] or 0) if 'coin_boost' in u.keys() else 0
+    bonus = min(boost * 5, 50)
+    next_cost_coins = int(500 * (1.6 ** boost)) if boost < 10 else 0
+    next_cost_gems = 2 + boost if boost < 10 else 0
+    text = (
+        f'💰 <b>ارتقای کیف پول / سکه</b>\n\n'
+        f'سطح فعلی: <b>{boost}/10</b>\n'
+        f'پاداش سکه از مأموریت‌ها: <b>+{bonus}٪</b>\n\n'
+    )
+    if boost >= 10:
+        text += '✅ به حداکثر سطح رسیده‌ای!'
+        kb = None
+    else:
+        text += (
+            f'برای ارتقای بعدی نیاز داری:\n'
+            f'🪙 {next_cost_coins} سکه\n'
+            f'🔮 {next_cost_gems} کریستال سایه\n\n'
+            f'موجودی فعلی: 🪙 {u["coins"]} | 🔮 {u["soul_gems"]}'
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f'⬆️ ارتقا به سطح {boost + 1}', callback_data='upgrade_coins_do')]
+        ])
+    await message.reply(text, reply_markup=kb)
+
+@router.callback_query(F.data == 'upgrade_coins_do')
+async def upgrade_coins_do(call: CallbackQuery):
+    ok, msg = await upgrade_coin_boost(call.from_user.id)
+    await call.answer('ارتقاء انجام شد ✅' if ok else 'ارتقاء ناموفق', show_alert=not ok)
+    await call.message.edit_text(msg if ok else f'❌ {msg}')
 
 @router.message(Command('family'))
 @router.message(F.text=='💍 خانواده')
@@ -103,9 +164,12 @@ async def _respond_marriage(call:CallbackQuery, accept:bool):
         proposer=int(call.data.split(':')[1])
     except Exception:
         return await call.answer('درخواست نامعتبر است.',show_alert=True)
-    async with __import__('aiosqlite').connect('spirits.db') as db:
-        cur=await db.execute("SELECT id FROM marriages WHERE user1_id=? AND user2_id=? AND status='pending' ORDER BY id DESC LIMIT 1", (proposer,call.from_user.id))
-        row=await cur.fetchone()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id FROM marriages WHERE user1_id=? AND user2_id=? AND status='pending' ORDER BY id DESC LIMIT 1",
+            (proposer, call.from_user.id)
+        )
+        row = await cur.fetchone()
     if not row:
         return await call.answer('این پیشنهاد دیگر معتبر نیست.',show_alert=True)
     ok=await respond_marriage(row[0],call.from_user.id,accept)
@@ -193,27 +257,35 @@ async def clue(call:CallbackQuery):
 @router.callback_query(F.data.startswith('choice:'))
 async def choice(call:CallbackQuery):
     _,sid,opt=call.data.split(':',2); sid=int(sid); s=await get_story_spirit(sid); c=await get_next_clue(call.from_user.id,sid); u=await get_user(call.from_user.id)
-    if u['energy']<=0:return await call.answer('💠 انرژی روحی کافی نداری.',show_alert=True)
-    import aiosqlite
-    async with aiosqlite.connect('spirits.db') as db:
-        await db.execute('UPDATE users SET energy=energy-1 WHERE user_id=?',(call.from_user.id,)); await db.commit()
-    correct=opt==c['correct_option']; ok,idx,done=await advance_spirit(call.from_user.id,sid,correct)
+    if not await spend_energy(call.from_user.id, 1):
+        return await call.answer('💠 انرژی روحی کافی نداری.', show_alert=True)
+    correct = opt == c['correct_option']
+    ok, idx, done = await advance_spirit(call.from_user.id, sid, correct)
     if not correct:
         await call.message.edit_text('🌫️ انتخابت سرنخ را کامل نکرد.\n\nمی‌توانی دوباره بررسی کنی.',reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔎 ادامه بررسی',callback_data=f'clue:{sid}')]])); return await call.answer('سرنخ اشتباه بود.')
     if done:return await complete_spirit(call,sid,s)
     await call.message.edit_text(f'✨ سرنخ پیدا شد!\n\nپیشرفت پرونده: {idx}/{await clue_count(sid)}',reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔎 سرنخ بعدی',callback_data=f'clue:{sid}')]])); await call.answer('درست بود!')
 
 async def clue_count(sid):
-    import aiosqlite
-    async with aiosqlite.connect('spirits.db') as db:
-        cur=await db.execute('SELECT COUNT(*) FROM spirit_clues WHERE spirit_id=?',(sid,)); return (await cur.fetchone())[0]
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute('SELECT COUNT(*) FROM spirit_clues WHERE spirit_id=?', (sid,))
+        return (await cur.fetchone())[0]
 
-async def complete_spirit(call,sid,s):
-    await add_progress(call.from_user.id,s['reward_coins'],s['reward_xp'],spirit=True)
-    import aiosqlite
-    async with aiosqlite.connect('spirits.db') as db:
-        await db.execute('UPDATE users SET light=light+? WHERE user_id=?',(max(1,s['difficulty']*2),call.from_user.id)); await db.commit()
-    await call.message.edit_text(f"✨ <b>روح آرام گرفت</b>\n\n👻 {s['name']} حقیقت را یافت و از مرز میان دو دنیا عبور کرد.\n\n🪙 +{s['reward_coins']} سکه\n✨ +{s['reward_xp']} XP\n✨ +{max(1,s['difficulty']*2)} نور پسین"); await call.answer('روح راهی شد ✨')
+async def complete_spirit(call, sid, s):
+    final_coins = await add_progress(call.from_user.id, s['reward_coins'], s['reward_xp'], spirit=True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            'UPDATE users SET light=light+? WHERE user_id=?',
+            (max(1, s['difficulty'] * 2), call.from_user.id)
+        )
+        await db.commit()
+    await call.message.edit_text(
+        f"✨ <b>روح آرام گرفت</b>\n\n"
+        f"👻 {s['name']} حقیقت را یافت و از مرز میان دو دنیا عبور کرد.\n\n"
+        f"🪙 +{final_coins} سکه\n✨ +{s['reward_xp']} XP\n"
+        f"✨ +{max(1, s['difficulty'] * 2)} نور پسین"
+    )
+    await call.answer('روح راهی شد ✨')
 
 @router.callback_query(F.data=='world:spirits')
 async def world_spirits(call:CallbackQuery):
@@ -225,45 +297,167 @@ async def region_demons(call:CallbackQuery):
     await call.message.edit_text('😈 <b>موجودات منطقه</b>',reply_markup=kb); await call.answer()
 
 @router.message(F.text=='😈 جن‌ها')
+@router.message(F.text=='🛡️ پاک‌سازی')
 async def demons_message(message:Message):
-    rows=await list_demons(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f"demon:{d['id']}")] for d in rows]); await message.reply('😈 <b>دفتر موجودات</b>',reply_markup=kb)
+    rows=await list_demons()
+    if not rows:
+        return await message.reply('😈 هنوز موجودی در دفتر ثبت نشده است.')
+    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f"demon:{d['id']}")] for d in rows])
+    await message.reply(
+        '😈 <b>دفتر موجودات و جن‌ها</b>\n\nیکی را انتخاب کن تا پاک‌سازی شروع شود.',
+        reply_markup=kb
+    )
 
 @router.callback_query(F.data=='world:demons')
 async def demons(call:CallbackQuery):
     rows=await list_demons(); kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"😈 {d['name']} | {'★'*d['rank']}",callback_data=f'demon:{d["id"]}')] for d in rows]); await call.message.edit_text('😈 <b>دفتر موجودات</b>',reply_markup=kb); await call.answer()
 
 @router.callback_query(F.data.startswith('demon:'))
-async def demon(call:CallbackQuery):
-    did=int(call.data.split(':')[1]); d=await get_demon(did)
-    if not d:return await call.answer('موجود پیدا نشد.',show_alert=True)
-    kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔍 بررسی آلودگی',callback_data=f'dcheck:{did}')],[InlineKeyboardButton(text='🔮 مهر محافظ',callback_data=f'dseal:{did}')],[InlineKeyboardButton(text='🕯️ پاک‌سازی',callback_data=f'dclean:{did}')],[InlineKeyboardButton(text='🏃 عقب‌نشینی',callback_data='world:demons')]])
-    await call.message.edit_text(f"😈 <b>{d['name']}</b>\n\nنوع: {d['type']}\nرتبه: {'★'*d['rank']}\nمنطقه: {d['region_name']}\n❤️ سلامت: {d['health']}\n☠️ آلودگی: {d['corruption']}٪\n🛡️ دفاع: {d['defense']}\n\n📜 {d['story']}",reply_markup=kb); await call.answer()
+async def demon(call: CallbackQuery):
+    did = int(call.data.split(':')[1])
+    d = await get_demon(did)
+    if not d:
+        return await call.answer('موجود پیدا نشد.', show_alert=True)
+    e = await get_or_create_encounter(call.from_user.id, did)
+    status = e['status'] if e else 'active'
+    buttons = []
+    if status == 'completed':
+        buttons.append([InlineKeyboardButton(text='🔄 مبارزه دوباره (۵ انرژی)', callback_data=f'dreset:{did}')])
+    else:
+        buttons.extend([
+            [InlineKeyboardButton(text='🔍 بررسی آلودگی', callback_data=f'dcheck:{did}')],
+            [InlineKeyboardButton(text='🔮 مهر محافظ', callback_data=f'dseal:{did}')],
+            [InlineKeyboardButton(text='🕯️ پاک‌سازی', callback_data=f'dclean:{did}')],
+        ])
+    buttons.append([InlineKeyboardButton(text='🏃 عقب‌نشینی', callback_data='world:demons')])
+    hp_show = e['health'] if e else d['health']
+    corr_show = e['corruption'] if e else d['corruption']
+    await call.message.edit_text(
+        f"😈 <b>{d['name']}</b>\n\n"
+        f"نوع: {d['type']}\nرتبه: {'★'*d['rank']}\nمنطقه: {d['region_name']}\n"
+        f"❤️ سلامت: {hp_show}\n☠️ آلودگی: {corr_show}٪\n🛡️ دفاع: {d['defense']}\n"
+        f"وضعیت: {'✅ پاک‌سازی‌شده' if status == 'completed' else '⚔️ فعال'}\n\n"
+        f"📜 {d['story']}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await call.answer()
 
 @router.callback_query(F.data.startswith('dcheck:'))
-async def dcheck(call:CallbackQuery):
-    did=int(call.data.split(':')[1]); d=await get_demon(did); e=await get_or_create_encounter(call.from_user.id,did); await call.answer(f"☠️ آلودگی: {e['corruption']}٪ | ❤️ سلامت: {e['health']}",show_alert=True)
+async def dcheck(call: CallbackQuery):
+    did = int(call.data.split(':')[1])
+    e = await get_or_create_encounter(call.from_user.id, did)
+    if not e:
+        return await call.answer('موجود پیدا نشد.', show_alert=True)
+    status = e['status'] if 'status' in e.keys() else 'active'
+    await call.answer(
+        f"☠️ آلودگی: {e['corruption']}٪ | ❤️ سلامت: {e['health']} | وضعیت: {status}",
+        show_alert=True
+    )
 
 @router.callback_query(F.data.startswith('dseal:'))
-async def dseal(call:CallbackQuery):
-    did=int(call.data.split(':')[1]); d=await get_demon(did); e=await get_or_create_encounter(call.from_user.id,did); u=await get_user(call.from_user.id)
-    if u['energy']<2:return await call.answer('💠 انرژی کافی نداری.',show_alert=True)
-    import aiosqlite
-    async with aiosqlite.connect('spirits.db') as db: await db.execute('UPDATE users SET energy=energy-2 WHERE user_id=?',(call.from_user.id,)); await db.commit()
-    corr=max(0,e['corruption']-random.randint(12,24)); hp=max(0,e['health']-random.randint(10,35)); await update_encounter(call.from_user.id,did,hp,corr,e['stage'])
-    await call.message.edit_text(f'🔮 مهر محافظ فعال شد!\n\n☠️ آلودگی: {corr}%\n❤️ سلامت: {hp}',reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🕯️ ادامه پاک‌سازی',callback_data=f'dclean:{did}')]])); await call.answer('آلودگی کاهش یافت.')
+async def dseal(call: CallbackQuery):
+    did = int(call.data.split(':')[1])
+    d = await get_demon(did)
+    e = await get_or_create_encounter(call.from_user.id, did)
+    if not d or not e:
+        return await call.answer('موجود پیدا نشد.', show_alert=True)
+    if e['status'] == 'completed':
+        return await call.answer('این موجود قبلاً پاک‌سازی شده. از «مبارزه دوباره» استفاده کن.', show_alert=True)
+    if not await spend_energy(call.from_user.id, 2):
+        return await call.answer('💠 انرژی کافی نداری.', show_alert=True)
+    corr = max(0, e['corruption'] - random.randint(12, 24))
+    hp = max(0, e['health'] - random.randint(10, 35))
+    await update_encounter(call.from_user.id, did, hp, corr, e['stage'])
+    await call.message.edit_text(
+        f'🔮 مهر محافظ فعال شد!\n\n☠️ آلودگی: {corr}%\n❤️ سلامت: {hp}',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='🕯️ ادامه پاک‌سازی', callback_data=f'dclean:{did}')]
+        ])
+    )
+    await call.answer('آلودگی کاهش یافت.')
 
 @router.callback_query(F.data.startswith('dclean:'))
-async def dclean(call:CallbackQuery):
-    did=int(call.data.split(':')[1]); d=await get_demon(did); e=await get_or_create_encounter(call.from_user.id,did); u=await get_user(call.from_user.id)
-    if u['energy']<2:return await call.answer('💠 انرژی کافی نداری.',show_alert=True)
-    import aiosqlite
-    async with aiosqlite.connect('spirits.db') as db: await db.execute('UPDATE users SET energy=energy-2 WHERE user_id=?',(call.from_user.id,)); await db.commit()
-    corr=max(0,e['corruption']-random.randint(15,30)); hp=max(0,e['health']-random.randint(20,55));
-    if corr==0:
-        await update_encounter(call.from_user.id,did,hp,corr,e['stage'],'completed'); await add_progress(call.from_user.id,d['reward_coins'],d['reward_xp'],cleanse=True)
-        await call.message.edit_text(f'✨ <b>پاک‌سازی کامل شد!</b>\n\n😈 {d["name"]} از آلودگی رها شد.\n🪙 +{d["reward_coins"]}\n✨ +{d["reward_xp"]} XP'); return await call.answer('پاک‌سازی کامل شد!')
-    await update_encounter(call.from_user.id,did,hp,corr,e['stage']+1)
-    await call.message.edit_text(f'🕯️ مرحله پاک‌سازی انجام شد.\n\n☠️ آلودگی باقی‌مانده: {corr}%\n❤️ سلامت موجود: {hp}',reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔮 مهر محافظ',callback_data=f'dseal:{did}'),InlineKeyboardButton(text='🕯️ پاک‌سازی بعدی',callback_data=f'dclean:{did}')]])); await call.answer('ادامه بده!')
+async def dclean(call: CallbackQuery):
+    did = int(call.data.split(':')[1])
+    d = await get_demon(did)
+    e = await get_or_create_encounter(call.from_user.id, did)
+    if not d or not e:
+        return await call.answer('موجود پیدا نشد.', show_alert=True)
+    if e['status'] == 'completed':
+        return await call.answer('این موجود قبلاً پاک‌سازی شده. از «مبارزه دوباره» استفاده کن.', show_alert=True)
+    if not await spend_energy(call.from_user.id, 2):
+        return await call.answer('💠 انرژی کافی نداری.', show_alert=True)
+    corr = max(0, e['corruption'] - random.randint(15, 30))
+    hp = max(0, e['health'] - random.randint(20, 55))
+    if corr == 0:
+        await update_encounter(call.from_user.id, did, hp, corr, e['stage'], 'completed')
+        final_coins = await add_progress(call.from_user.id, d['reward_coins'], d['reward_xp'], cleanse=True)
+        await call.message.edit_text(
+            f'✨ <b>پاک‌سازی کامل شد!</b>\n\n'
+            f'😈 {d["name"]} از آلودگی رها شد.\n'
+            f'🪙 +{final_coins} سکه\n✨ +{d["reward_xp"]} XP\n\n'
+            f'می‌توانی بعداً دوباره با او مبارزه کنی.',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text='🔄 مبارزه دوباره (۵ انرژی)', callback_data=f'dreset:{did}')],
+                [InlineKeyboardButton(text='🔙 دفتر جن‌ها', callback_data='world:demons')]
+            ])
+        )
+        return await call.answer('پاک‌سازی کامل شد!')
+    await update_encounter(call.from_user.id, did, hp, corr, e['stage'] + 1)
+    await call.message.edit_text(
+        f'🕯️ مرحله پاک‌سازی انجام شد.\n\n'
+        f'☠️ آلودگی باقی‌مانده: {corr}%\n❤️ سلامت موجود: {hp}',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text='🔮 مهر محافظ', callback_data=f'dseal:{did}'),
+                InlineKeyboardButton(text='🕯️ پاک‌سازی بعدی', callback_data=f'dclean:{did}')
+            ]
+        ])
+    )
+    await call.answer('ادامه بده!')
+
+@router.callback_query(F.data.startswith('dreset:'))
+async def dreset(call: CallbackQuery):
+    did = int(call.data.split(':')[1])
+    d = await get_demon(did)
+    if not d:
+        return await call.answer('موجود پیدا نشد.', show_alert=True)
+    if not await spend_energy(call.from_user.id, 5):
+        return await call.answer('💠 برای مبارزه دوباره به ۵ انرژی نیاز داری.', show_alert=True)
+    await reset_encounter(call.from_user.id, did)
+    e = await get_or_create_encounter(call.from_user.id, did)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='🔍 بررسی آلودگی', callback_data=f'dcheck:{did}')],
+        [InlineKeyboardButton(text='🔮 مهر محافظ', callback_data=f'dseal:{did}')],
+        [InlineKeyboardButton(text='🕯️ پاک‌سازی', callback_data=f'dclean:{did}')],
+        [InlineKeyboardButton(text='🏃 عقب‌نشینی', callback_data='world:demons')]
+    ])
+    await call.message.edit_text(
+        f"🔄 <b>مبارزه دوباره با {d['name']}</b>\n\n"
+        f"نوع: {d['type']}\nرتبه: {'★'*d['rank']}\n"
+        f"❤️ سلامت: {e['health']}\n☠️ آلودگی: {e['corruption']}٪\n\n"
+        f"📜 {d['story']}",
+        reply_markup=kb
+    )
+    await call.answer('مبارزه از نو شروع شد!')
+
+
+@router.message(Command("balance"))
+@router.message(F.text == "💰 موجودی")
+async def balance_cmd(message: Message):
+    await ensure_user(message.from_user.id, message.from_user.full_name)
+    u = await get_user(message.from_user.id)
+    boost = int(u["coin_boost"] or 0) if "coin_boost" in u.keys() else 0
+    bonus = min(boost * 5, 50)
+    await message.reply(
+        f"💰 <b>موجودی</b>\n\n"
+        f"🪙 سکه: {u['coins']}\n"
+        f"🔮 کریستال سایه: {u['soul_gems']}\n"
+        f"💠 انرژی: {u['energy']}\n"
+        f"✨ نور پسین: {u['light']}\n"
+        f"💰 ارتقای سکه: سطح {boost}/10 (+{bonus}٪)\n\n"
+        f"برای ارتقا از دکمه «💰 ارتقای سکه» استفاده کن."
+    )
 
 @router.message(Command('daily'))
 @router.message(F.text=='🎁 جایزه روزانه')
