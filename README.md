@@ -10,7 +10,7 @@
 .
 ├── bot.py              # نقطه ورود ربات
 ├── web_app.py          # سرور Web App + API
-├── database.py         # SQLite + منطق دیتابیس
+├── database.py         # PostgreSQL + منطق دیتابیس
 ├── admin.py            # پنل مدیریت و دستورات ادمین
 ├── game.py / start.py  # منطق بازی و منوها
 ├── config.py           # تنظیمات و اختیارات نقش‌ها
@@ -21,6 +21,20 @@
 ├── .env.example
 └── .gitignore
 ```
+
+## اتصال به PostgreSQL
+
+نسخه فعلی برای PostgreSQL آماده شده و دیگر از فایل SQLite استفاده نمی‌کند. کافی است متغیر `DATABASE_URL` را تنظیم کنید:
+
+```env
+DATABASE_URL=postgresql://USERNAME:PASSWORD@HOST:5432/DATABASE_NAME
+BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+ADMIN_IDS=123456789
+```
+
+با اولین اجرای ربات، جدول‌ها و داده‌های اولیه بازی به‌صورت خودکار ساخته می‌شوند. `schema_postgresql.sql` نیز برای ساخت دستی جدول‌ها در PostgreSQL قرار داده شده است.
+
+نکته: اگر سرویس PostgreSQL شما یک URL با `postgres://` می‌دهد، برنامه آن را نیز قبول می‌کند.
 
 ## اجرای محلی ربات
 
@@ -40,7 +54,7 @@ python web_app.py
 
 ## نگهداری دائمی داده‌ها (مهم)
 
-SQLite به صورت پیش‌فرض در مسیر زیر ذخیره می‌شود:
+PostgreSQL به صورت پیش‌فرض در مسیر زیر ذخیره می‌شود:
 
 - اگر پوشه `/var/data` وجود داشته باشد → `/var/data/spirits.db`
 - در غیر این صورت → `spirits.db` در پوشه فعلی
@@ -51,7 +65,7 @@ SQLite به صورت پیش‌فرض در مسیر زیر ذخیره می‌شو
 2. Mount Path را بگذارید: `/var/data`
 3. (اختیاری) Environment Variable:
    ```
-   DB_PATH=/var/data/spirits.db
+   DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME
    ```
 
 کد به صورت خودکار پوشه والد دیتابیس را می‌سازد. با این کار بعد از Redeploy یا Restart، پیشرفت بازیکنان پاک نمی‌شود.
@@ -107,7 +121,7 @@ SQLite به صورت پیش‌فرض در مسیر زیر ذخیره می‌شو
 3. Environment Variables:
    - `BOT_TOKEN`
    - `ADMIN_IDS`
-   - `DB_PATH=/var/data/spirits.db`
+   - `DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME`
 4. Persistent Disk با Mount Path: `/var/data`
 5. بعد از Deploy، URL سرویس (مثلاً `https://xxx.onrender.com`) را در BotFather به‌عنوان **Menu Button / Web App** بگذارید.
 

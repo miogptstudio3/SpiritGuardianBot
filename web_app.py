@@ -11,10 +11,9 @@ from datetime import datetime, timezone, timedelta
 from aiohttp import web
 import aiosqlite
 
-DB_PATH = os.getenv(
-    "DB_PATH",
-    "/var/data/spirits.db" if os.path.isdir("/var/data") else "spirits.db",
-)
+DB_PATH = os.getenv("DATABASE_URL", "").strip()
+if not DB_PATH:
+    raise RuntimeError("DATABASE_URL در فایل .env تنظیم نشده است.")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -163,7 +162,7 @@ async def use_item(request):
             (u["user_id"], item_id),
         )
         await db.execute(
-            """UPDATE users SET energy=MIN(100, energy+?),
+            """UPDATE users SET energy=LEAST(100, energy+?),
                spirit_power=spirit_power+?, xp=xp+? WHERE user_id=?""",
             (
                 item["energy_gain"],
@@ -322,7 +321,7 @@ async def daily_api(request):
         raise web.HTTPBadRequest(text="پاداش امروز را قبلاً گرفته‌ای. فردا دوباره بیا.")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "UPDATE users SET coins=coins+100, energy=MIN(100, energy+5), last_daily=? WHERE user_id=?",
+            "UPDATE users SET coins=coins+100, energy=LEAST(100, energy+5), last_daily=? WHERE user_id=?",
             (today, u["user_id"]),
         )
         await db.commit()

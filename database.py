@@ -2,15 +2,11 @@ import aiosqlite
 import os
 from datetime import datetime, timezone
 
-# Render's local filesystem is ephemeral. If a persistent disk is mounted at
-# /var/data, keep the SQLite database there so player progress survives deploys.
-# You can override this with DB_PATH in Render Environment Variables.
-DEFAULT_DB_PATH = "/var/data/spirits.db" if os.path.isdir("/var/data") else "spirits.db"
-DB_PATH = os.getenv("DB_PATH", DEFAULT_DB_PATH)
-# Always ensure the directory exists so SQLite can create the file (persistent disk or local)
-_db_parent = os.path.dirname(DB_PATH)
-if _db_parent:
-    os.makedirs(_db_parent, exist_ok=True)
+# PostgreSQL connection string is provided through DATABASE_URL.
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DB_PATH = DATABASE_URL  # kept for compatibility with game.py/web_app.py
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL در فایل .env تنظیم نشده است.")
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -206,18 +202,18 @@ async def init_db():
 
         # Migration for existing databases.
         for statement in [
-            "ALTER TABLE users ADD COLUMN max_health INTEGER NOT NULL DEFAULT 100",
-            "ALTER TABLE users ADD COLUMN health INTEGER NOT NULL DEFAULT 100",
-            "ALTER TABLE users ADD COLUMN light INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN gender TEXT",
-            "ALTER TABLE moderation ADD COLUMN ban_until TEXT",
-            "ALTER TABLE moderation ADD COLUMN reason TEXT",
-            "ALTER TABLE users ADD COLUMN mind_power INTEGER NOT NULL DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN body_power INTEGER NOT NULL DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN spirit_power INTEGER NOT NULL DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN training_points INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN last_training TEXT",
-            "ALTER TABLE users ADD COLUMN coin_boost INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS max_health INTEGER NOT NULL DEFAULT 100",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS health INTEGER NOT NULL DEFAULT 100",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS light INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT",
+            "ALTER TABLE moderation ADD COLUMN IF NOT EXISTS ban_until TEXT",
+            "ALTER TABLE moderation ADD COLUMN IF NOT EXISTS reason TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS mind_power INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS body_power INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS spirit_power INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS training_points INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_training TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS coin_boost INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 await db.execute(statement)
@@ -354,7 +350,7 @@ async def init_db():
 async def ensure_user(user_id: int, name: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO users(user_id, name, coins, energy, soul_gems) VALUES (?, ?, COALESCE((SELECT value FROM currencies WHERE key='starting_coins'),100), COALESCE((SELECT value FROM currencies WHERE key='starting_energy'),10), COALESCE((SELECT value FROM currencies WHERE key='starting_gems'),0))",
+            "INSERT INTO users(user_id, name, coins, energy, soul_gems) VALUES (?, ?, COALESCE((SELECT value FROM currencies WHERE key='starting_coins'),100), COALESCE((SELECT value FROM currencies WHERE key='starting_energy'),10), COALESCE((SELECT value FROM currencies WHERE key='starting_gems'),0))",
             (user_id, name[:80])
         )
         await db.execute("UPDATE users SET name=? WHERE user_id=?", (name[:80], user_id))
@@ -484,7 +480,7 @@ async def daily_claim(user_id: int):
         if row["last_daily"] == today:
             return False, "پاداش امروز را قبلاً گرفته‌ای. فردا دوباره بیا."
         await db.execute(
-            "UPDATE users SET coins=coins+100, energy=MIN(100, energy+5), last_daily=? WHERE user_id=?",
+            "UPDATE users SET coins=coins+100, energy=LEAST(100, energy+5), last_daily=? WHERE user_id=?",
             (today, user_id)
         )
         await db.commit()
@@ -1030,7 +1026,7 @@ async def care_for_child(user_id: int, child_id: int):
     if not allowed:
         return False
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE children SET happiness=MIN(100,happiness+10), health=MIN(100,health+5) WHERE id=?", (child_id,))
+        await db.execute("UPDATE children SET happiness=LEAST(100,happiness+10), health=LEAST(100,health+5) WHERE id=?", (child_id,))
         await db.commit()
     return True
 
